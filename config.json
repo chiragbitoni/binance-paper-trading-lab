@@ -1,6 +1,6 @@
 {
   "mode": "paper",
-  "symbol": "BTCUSDT",
+  "symbols": ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"],
   "interval": "4h",
   "starting_balance": 10.0,
   "max_position_value": 8.0,

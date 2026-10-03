@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Automated](https://img.shields.io/badge/GitHub%20Actions-every%204h-2088FF?logo=githubactions&logoColor=white)](https://github.com/chiragbitoni/binance-paper-trading-lab/actions)
 
-A transparent, paper-first Binance Spot strategy research bot for BTC/USDT. It backtests multiple rule-based strategies, tracks independent forward-paper accounts, stores win/loss statistics in SQLite, and publishes a static dashboard after every completed four-hour candle.
+A transparent, paper-first Binance Spot strategy research bot for five liquid USDT markets. It backtests multiple rule-based strategies, tracks isolated forward-paper accounts for every market/strategy pair, stores win/loss statistics in SQLite, and publishes a static dashboard after every completed four-hour candle.
 
 **[Open the live paper-trading dashboard](https://chiragbitoni.github.io/binance-paper-trading-lab/)**
 
@@ -12,7 +12,8 @@ A transparent, paper-first Binance Spot strategy research bot for BTC/USDT. It b
 
 ## Highlights
 
-- Multiple explainable trading strategies with separate $10 paper balances
+- Five parallel markets: BTC, ETH, BNB, SOL, and XRP against USDT
+- Multiple explainable trading strategies with a separate $10 paper balance per market/strategy pair
 - Two-year historical backtests with fees, slippage, and next-candle execution
 - Return, win rate, profit factor, trade count, and maximum drawdown tracking
 - Forward-paper positions and trades stored independently from backtests
@@ -58,9 +59,9 @@ python run.py paper --loop
 
 Edit `config.json` to change the symbol, candle interval, simulated balance, position cap, fees, slippage, history length, or enabled strategies. The default experiment uses:
 
-- Symbol: `BTCUSDT`
+- Markets: `BTCUSDT`, `ETHUSDT`, `BNBUSDT`, `SOLUSDT`, and `XRPUSDT`
 - Candle interval: `4h`
-- Paper balance: `$10` per strategy
+- Paper balance: `$10` per market/strategy pair
 - Maximum position: `$8`
 - Minimum notional: `$5`
 - Historical window: `730` days

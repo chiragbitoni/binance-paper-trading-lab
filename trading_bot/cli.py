@@ -45,17 +45,18 @@ def main() -> None:
         if args.command == "backtest":
             end = datetime.now(timezone.utc)
             start = end - timedelta(days=cfg.history_days)
-            data = market.candles(cfg.symbol, cfg.interval, int(start.timestamp() * 1000), int(end.timestamp() * 1000))
-            for key in cfg.enabled_strategies:
-                strategy = STRATEGIES[key]
-                result, trades = run_backtest(data, strategy, cfg)
-                run_id = storage.save_backtest(result, trades)
-                print(f"#{run_id} {strategy.name}: return={result['total_return_pct']:.2f}% "
-                      f"trades={result['trades']} win_rate={result['win_rate']:.1f}% "
-                      f"PF={result['profit_factor']} DD={result['max_drawdown_pct']:.2f}%")
+            for symbol in cfg.symbols:
+                data = market.candles(symbol, cfg.interval, int(start.timestamp() * 1000), int(end.timestamp() * 1000))
+                for key in cfg.enabled_strategies:
+                    strategy = STRATEGIES[key]
+                    result, trades = run_backtest(data, strategy, cfg, symbol)
+                    run_id = storage.save_backtest(result, trades)
+                    print(f"#{run_id} {symbol} {strategy.name}: return={result['total_return_pct']:.2f}% "
+                          f"trades={result['trades']} win_rate={result['win_rate']:.1f}% "
+                          f"PF={result['profit_factor']} DD={result['max_drawdown_pct']:.2f}%")
         elif args.command == "paper":
             paper_strategies = [key for key in cfg.enabled_strategies if key != "buy_hold_benchmark"]
-            storage.initialize_paper_accounts(paper_strategies, cfg.starting_balance)
+            storage.initialize_paper_accounts(cfg.symbols, paper_strategies, cfg.starting_balance)
             if args.loop:
                 paper_loop(cfg, storage, market)
             else:

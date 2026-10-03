@@ -9,7 +9,7 @@ from .indicators import add_indicators
 from .strategies import Strategy
 
 
-def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config) -> tuple[dict, list[dict]]:
+def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config, symbol: str) -> tuple[dict, list[dict]]:
     df = add_indicators(raw).reset_index(drop=True)
     cash = cfg.starting_balance
     quantity = 0.0
@@ -100,7 +100,7 @@ def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config) -> tuple[di
             max_drawdown = max(max_drawdown, (peak - equity) / peak * 100)
 
     result = {
-        "strategy_key": strategy.key, "symbol": cfg.symbol, "interval": cfg.interval,
+        "strategy_key": strategy.key, "symbol": symbol, "interval": cfg.interval,
         "start_time": str(df.iloc[0].open_time), "end_time": str(df.iloc[-1].close_time),
         "starting_balance": cfg.starting_balance, "ending_balance": round(cash, 8),
         "total_return_pct": round((cash / cfg.starting_balance - 1) * 100, 4),

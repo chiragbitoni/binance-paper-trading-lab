@@ -8,7 +8,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class Config:
     mode: str
-    symbol: str
+    symbols: list[str]
     interval: str
     starting_balance: float
     max_position_value: float
@@ -30,5 +30,6 @@ def load_config(path: str | Path = "config.json") -> Config:
         raise ValueError("mode must be 'paper' or 'live'")
     if cfg.starting_balance <= 0 or cfg.max_position_value <= 0:
         raise ValueError("balances must be positive")
+    if not cfg.symbols or len(cfg.symbols) != len(set(cfg.symbols)):
+        raise ValueError("symbols must contain at least one unique market")
     return cfg
-
