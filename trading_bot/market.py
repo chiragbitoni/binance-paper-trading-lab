@@ -12,6 +12,10 @@ import requests
 
 
 SPOT_API = "https://api.binance.com"
+# Binance's official market-data-only host works from cloud runners where the
+# main trading API may return HTTP 451. It exposes klines/exchangeInfo only and
+# never accepts account credentials or orders.
+MARKET_DATA_API = "https://data-api.binance.vision"
 
 
 class BinanceMarketData:
@@ -29,7 +33,7 @@ class BinanceMarketData:
                 params["startTime"] = cursor
             if end_ms is not None:
                 params["endTime"] = end_ms
-            response = self.session.get(f"{SPOT_API}/api/v3/klines", params=params, timeout=self.timeout)
+            response = self.session.get(f"{MARKET_DATA_API}/api/v3/klines", params=params, timeout=self.timeout)
             response.raise_for_status()
             batch = response.json()
             if not batch:
@@ -56,7 +60,7 @@ class BinanceMarketData:
         return frame.drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
 
     def exchange_info(self, symbol: str) -> dict:
-        response = self.session.get(f"{SPOT_API}/api/v3/exchangeInfo", params={"symbol": symbol}, timeout=self.timeout)
+        response = self.session.get(f"{MARKET_DATA_API}/api/v3/exchangeInfo", params={"symbol": symbol}, timeout=self.timeout)
         response.raise_for_status()
         return response.json()["symbols"][0]
 
@@ -96,4 +100,3 @@ class BinanceLiveClient:
 
 def utc_now_ms() -> int:
     return int(datetime.now(timezone.utc).timestamp() * 1000)
-
