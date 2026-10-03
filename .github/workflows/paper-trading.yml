@@ -1,0 +1,59 @@
+name: Paper trading
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Binance 4-hour candles close at 00, 04, 08, 12, 16 and 20 UTC.
+    # A 12-minute delay gives the exchange time to finalize the candle.
+    - cron: "12 0,4,8,12,16,20 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paper-trading
+  cancel-in-progress: false
+
+jobs:
+  update-paper-state:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Initialize historical statistics if needed
+        run: |
+          if [ ! -f data/trading_bot.db ]; then
+            python run.py backtest
+          fi
+
+      - name: Process latest completed candle
+        run: python run.py paper
+
+      - name: Build static dashboard
+        run: python run.py render-static
+
+      - name: Save updated state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/trading_bot.db docs/index.html
+          if git diff --cached --quiet; then
+            echo "No state change to save"
+          else
+            git commit -m "Update paper trading state"
+            git push
+          fi
+

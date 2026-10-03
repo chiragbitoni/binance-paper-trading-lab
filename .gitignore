@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.env
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+work/
+outputs/
