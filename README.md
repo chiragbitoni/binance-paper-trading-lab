@@ -1,50 +1,123 @@
 # Binance Paper Trading Strategy Lab
 
-This project backtests several transparent strategies and runs each one in an independent paper account. The default configuration uses BTC/USDT, four-hour candles, and $10 per strategy. Real orders are locked.
+[![Paper Trading](https://img.shields.io/badge/mode-paper%20trading-2ea44f)](https://chiragbitoni.github.io/binance-paper-trading-lab/)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Automated](https://img.shields.io/badge/GitHub%20Actions-every%204h-2088FF?logo=githubactions&logoColor=white)](https://github.com/chiragbitoni/binance-paper-trading-lab/actions)
+
+A transparent, paper-first Binance Spot strategy research bot for BTC/USDT. It backtests multiple rule-based strategies, tracks independent forward-paper accounts, stores win/loss statistics in SQLite, and publishes a static dashboard after every completed four-hour candle.
+
+**[Open the live paper-trading dashboard](https://chiragbitoni.github.io/binance-paper-trading-lab/)**
+
+> This project is educational software, not financial advice. Historical results do not predict future performance. Real orders are disabled by default.
+
+## Highlights
+
+- Multiple explainable trading strategies with separate $10 paper balances
+- Two-year historical backtests with fees, slippage, and next-candle execution
+- Return, win rate, profit factor, trade count, and maximum drawdown tracking
+- Forward-paper positions and trades stored independently from backtests
+- Binance market-data-only API; no credentials required for paper mode
+- Automated four-hour updates through GitHub Actions
+- Lightweight dashboard published through GitHub Pages
+- Live-order method protected by an explicit safety lock
+
+## Included strategies
+
+| Strategy | Research purpose |
+| --- | --- |
+| 50/200 EMA regime | Long-term trend participation |
+| Trend + Donchian breakout | Breakout confirmation inside a trend |
+| Slow EMA regime | Broad directional trend filter |
+| EMA trend pullback | Pullback entries during an established trend |
+| Quiet-to-active breakout | Volatility expansion after compression |
+| Bollinger/RSI recovery | Mean recovery with a trend filter |
+| Buy-and-hold benchmark | Baseline using the same position cap |
+
+The dashboard contains the latest saved results. Compare net return, drawdown, profit factor, and sample size together—win rate alone is not enough.
 
 ## Quick start
 
+Requirements: Python 3.11 or newer.
+
 ```powershell
+git clone https://github.com/chiragbitoni/binance-paper-trading-lab.git
+cd binance-paper-trading-lab
 python -m pip install -r requirements.txt
 python run.py backtest
 python run.py paper
 python run.py dashboard
 ```
 
-Open <http://127.0.0.1:8765> after starting the dashboard. Use `python run.py paper --loop` in another terminal to check each newly completed candle automatically.
-
-Historical results and paper trades are stored in `data/trading_bot.db`. Backtest statistics and forward-paper statistics are intentionally separate.
-
-## Strategies
-
-- Trend + Donchian breakout
-- Slow 200-EMA regime
-- 50/200 EMA regime
-- EMA trend pullback
-- Quiet-to-active volatility breakout
-- Trend-filtered Bollinger/RSI recovery
-- Buy-and-hold historical benchmark using the same $8 position cap
-
-Every backtest applies configured fees, slippage, an $8 maximum position, a $5 minimum notional, next-candle execution for close-based signals, and volatility stops.
-
-## Connecting Binance later
-
-Leave `mode` set to `paper` during research. API credentials are read only from environment variables and are never written to the database:
+Open `http://127.0.0.1:8765`. To keep checking for newly completed candles locally, run this in another terminal:
 
 ```powershell
-$env:BINANCE_API_KEY="your-read-or-trade-key"
-$env:BINANCE_API_SECRET="your-secret"
+python run.py paper --loop
+```
+
+## Configuration
+
+Edit `config.json` to change the symbol, candle interval, simulated balance, position cap, fees, slippage, history length, or enabled strategies. The default experiment uses:
+
+- Symbol: `BTCUSDT`
+- Candle interval: `4h`
+- Paper balance: `$10` per strategy
+- Maximum position: `$8`
+- Minimum notional: `$5`
+- Historical window: `730` days
+
+Backtest statistics and forward-paper results are intentionally stored separately in `data/trading_bot.db`.
+
+## Commands
+
+```text
+python run.py backtest               Run historical strategy tests
+python run.py paper                  Process the newest completed candle once
+python run.py paper --loop           Continuously watch for completed candles
+python run.py dashboard              Serve the local dashboard
+python run.py render-static          Rebuild docs/index.html for GitHub Pages
+python run.py check-live-connection  Test a read-only Binance connection
+```
+
+## Automation
+
+`.github/workflows/paper-trading.yml` runs 12 minutes after every four-hour Binance candle closes. Each run:
+
+1. Downloads current public Binance candle data.
+2. Updates every forward-paper account.
+3. Rebuilds the static dashboard.
+4. Commits the updated SQLite state and dashboard.
+
+The workflow uses no Binance credentials and never invokes the live-order client.
+
+## Security and optional Binance connectivity
+
+Paper mode needs no API key. For a read-only connectivity test, provide credentials only as local environment variables:
+
+```powershell
+$env:BINANCE_API_KEY="your-api-key"
+$env:BINANCE_API_SECRET="your-api-secret"
 python run.py check-live-connection
 ```
 
-Use an API key restricted to a trusted IP and keep withdrawals disabled. The included live client can check account connectivity. Its order method is additionally locked behind `LIVE_TRADING_ACK=I_UNDERSTAND_REAL_ORDERS`; the paper engine never calls that method. Review exchange filters, quantity rounding, live stop handling, and the selected strategy before wiring live execution.
+- Never commit credentials or place them in `config.json`.
+- `.env` files are ignored by Git.
+- Use a dedicated Binance key with withdrawals disabled.
+- Restrict any account key to a trusted static IP.
+- Do not add real-account credentials to the public GitHub Actions workflow.
 
-## Free scheduled paper trading on GitHub
+The included signed client can check account connectivity. Its market-order method is locked behind `LIVE_TRADING_ACK=I_UNDERSTAND_REAL_ORDERS`, and the automated paper engine never calls it. A production deployment still requires quantity rounding, exchange-filter validation, persistent stop handling, reconciliation, alerts, loss limits, and a fixed-IP server.
 
-The included `.github/workflows/paper-trading.yml` workflow runs 12 minutes after each four-hour Binance candle closes. It updates the SQLite paper state, renders `docs/index.html`, and commits both files back to the repository. It uses no Binance credentials.
+## Project structure
 
-For a public repository, enable GitHub Pages under **Settings → Pages**, select **Deploy from a branch**, choose the default branch and `/docs`, then save. Do not add Binance API credentials to this paper workflow or commit a `.env` file.
+```text
+trading_bot/     Strategies, indicators, backtester, storage and Binance clients
+data/            SQLite backtest and paper-trading state
+docs/            Generated static dashboard for GitHub Pages
+.github/         Scheduled paper-trading workflow
+config.json      Experiment and risk settings
+run.py           Command-line entry point
+```
 
-## Important interpretation
+## Risk notice
 
-Win rate alone does not measure strategy quality. Compare net return, profit factor, drawdown, trade count, and forward-paper behavior. Historical performance is descriptive and does not establish future profitability.
+Trading can lose money. Backtests are sensitive to market regime, assumptions, execution quality, fees, and overfitting. Validate strategies with a meaningful forward-paper sample before considering real capital, and avoid leverage while testing.
