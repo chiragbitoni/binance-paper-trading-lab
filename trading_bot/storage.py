@@ -231,7 +231,7 @@ class Storage:
         )
         self.connection.commit()
 
-    def market_candles(self, symbol: str, limit: int = 60) -> list[dict]:
+    def market_candles(self, symbol: str, limit: int = 180) -> list[dict]:
         rows = self.connection.execute(
             "SELECT * FROM market_candles WHERE symbol=? ORDER BY candle_time DESC LIMIT ?", (symbol, limit)
         ).fetchall()

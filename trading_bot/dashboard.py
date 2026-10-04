@@ -125,64 +125,158 @@ main{{max-width:1380px;margin:auto;padding:34px 24px 48px}}.top{{display:flex;ju
 
 
 def _candlestick_chart(symbol: str, candles: list[dict], positions: list[dict]) -> str:
-    """Render real stored Binance OHLC candles and all active positions for one ticker."""
-    candles = candles[-60:]
+    """Render a dependency-free canvas chart with zoom, pan, and OHLC inspection."""
     if len(candles) < 2:
         return "<p class='chart-empty'>Chart data will appear after the next completed paper cycle.</p>"
 
-    prices = [price for candle in candles for price in (candle["low"], candle["high"])]
-    prices.extend(position["entry_price"] for position in positions)
-    prices.extend(position["stop_price"] for position in positions)
-    low, high = min(prices), max(prices)
-    padding = max((high - low) * 0.10, high * 0.002)
-    low, high = low - padding, high + padding
-    width, height, left, right, top, bottom = 980, 340, 14, 14, 14, 26
-    plot_width, plot_height = width - left - right, height - top - bottom
-    price_range = max(high - low, 0.000001)
-
-    def y(price: float) -> float:
-        return top + (high - price) * plot_height / price_range
-
-    step = plot_width / len(candles)
-    body_width = max(2.0, step * 0.62)
-    candle_shapes: list[str] = []
-    for index, candle in enumerate(candles):
-        x = left + (index + 0.5) * step
-        is_up = candle["close"] >= candle["open"]
-        colour = "#55d998" if is_up else "#ff7b8b"
-        open_y, close_y = y(candle["open"]), y(candle["close"])
-        body_y = min(open_y, close_y)
-        body_height = max(1.5, abs(close_y - open_y))
-        candle_shapes.append(
-            f"<line x1='{x:.1f}' x2='{x:.1f}' y1='{y(candle['high']):.1f}' y2='{y(candle['low']):.1f}' stroke='{colour}' stroke-width='1.2'/>"
-            f"<rect x='{x - body_width / 2:.1f}' y='{body_y:.1f}' width='{body_width:.1f}' height='{body_height:.1f}' fill='{colour}'/>"
-        )
-
     palette = ["#fbc96a", "#a78bfa", "#22d3ee", "#fb7185"]
-    markers: list[str] = []
+    levels: list[dict] = []
     legend: list[str] = []
     for index, position in enumerate(positions):
         colour = palette[index % len(palette)]
-        entry_y, stop_y = y(position["entry_price"]), y(position["stop_price"])
-        markers.append(
-            f"<line x1='{left}' x2='{width - right}' y1='{entry_y:.1f}' y2='{entry_y:.1f}' stroke='{colour}' stroke-width='1.8' stroke-dasharray='7 5'/>"
-            f"<line x1='{left}' x2='{width - right}' y1='{stop_y:.1f}' y2='{stop_y:.1f}' stroke='{colour}' stroke-width='1.2' stroke-dasharray='2 5' opacity='.85'/>"
-        )
-        name = html.escape(STRATEGIES[position["strategy_key"]].name)
+        name = STRATEGIES[position["strategy_key"]].name
+        levels.extend([
+            {"price": position["entry_price"], "colour": colour, "kind": "ENTRY", "name": name},
+            {"price": position["stop_price"], "colour": colour, "kind": "STOP", "name": name},
+        ])
         legend.append(
-            f"<li><i style='background:{colour}'></i><strong>{name}</strong> · entry {_money(position['entry_price'])} · stop {_money(position['stop_price'])} · <span class='{_pnl_class(position['pnl'])}'>{_signed_money(position['pnl'])}</span></li>"
+            f"<li><i style='background:{colour}'></i><strong>{html.escape(name)}</strong> · entry {_money(position['entry_price'])} · stop {_money(position['stop_price'])} · <span class='{_pnl_class(position['pnl'])}'>{_signed_money(position['pnl'])}</span></li>"
         )
+    payload = {
+        "symbol": symbol,
+        "candles": [{"time": str(candle["candle_time"]), "open": candle["open"], "high": candle["high"],
+                     "low": candle["low"], "close": candle["close"], "volume": candle["volume"]}
+                    for candle in candles],
+        "levels": levels,
+    }
+    data = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
+    return f"""<div class='interactive-chart' data-symbol='{html.escape(symbol)}'>
+    <div class='chart-controls'><div><strong>{len(candles)} stored {html.escape(symbol)} candles</strong><span>Scroll to zoom · drag to pan · hover for OHLC</span></div><div class='chart-buttons'><button type='button' data-window='30'>30</button><button type='button' data-window='90'>90</button><button type='button' data-window='full'>Full</button></div></div>
+    <div class='chart-canvas-wrap'><canvas aria-label='{html.escape(symbol)} interactive OHLC candlestick chart'></canvas><div class='chart-tooltip' hidden></div></div>
+    <script type='application/json' class='chart-data'>{data}</script></div><ul class='position-legend'>{''.join(legend)}</ul>"""
 
-    first_time = html.escape(str(candles[0]["candle_time"])[:16])
-    last_time = html.escape(str(candles[-1]["candle_time"])[:16])
-    return f"""<svg class='candle-chart' viewBox='0 0 {width} {height}' role='img' aria-label='{html.escape(symbol)} OHLC candlestick chart'>
-    <rect x='{left}' y='{top}' width='{plot_width}' height='{plot_height}' class='chart-bg'/>
-    <line x1='{left}' x2='{width - right}' y1='{top + plot_height * .25:.1f}' y2='{top + plot_height * .25:.1f}' class='grid-line'/>
-    <line x1='{left}' x2='{width - right}' y1='{top + plot_height * .50:.1f}' y2='{top + plot_height * .50:.1f}' class='grid-line'/>
-    <line x1='{left}' x2='{width - right}' y1='{top + plot_height * .75:.1f}' y2='{top + plot_height * .75:.1f}' class='grid-line'/>
-    {''.join(candle_shapes)}{''.join(markers)}
-    <text x='{left}' y='{height - 7}' class='axis-text'>{first_time}</text><text x='{width - right}' y='{height - 7}' text-anchor='end' class='axis-text'>{last_time}</text>
-    </svg><ul class='position-legend'>{''.join(legend)}</ul>"""
+
+def _interactive_chart_script() -> str:
+    """Canvas controls shared by every static position chart."""
+    return """<script>
+(() => {
+  const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
+  document.querySelectorAll('.interactive-chart').forEach((root) => {
+    const payload = JSON.parse(root.querySelector('.chart-data').textContent);
+    const candles = payload.candles;
+    const canvas = root.querySelector('canvas');
+    const tooltip = root.querySelector('.chart-tooltip');
+    const ctx = canvas.getContext('2d');
+    let visible = candles.length;
+    let end = candles.length;
+    let drag = null;
+
+    const render = () => {
+      const bounds = canvas.getBoundingClientRect();
+      const width = Math.max(320, Math.floor(bounds.width));
+      const height = 440;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const left = 12, right = 68, top = 18, bottom = 30;
+      const plotWidth = width - left - right, plotHeight = height - top - bottom;
+      const start = clamp(end - visible, 0, Math.max(0, candles.length - visible));
+      const view = candles.slice(start, end);
+      const prices = view.flatMap((candle) => [candle.low, candle.high]).concat(payload.levels.map((line) => line.price));
+      const minimum = Math.min(...prices), maximum = Math.max(...prices);
+      const padding = Math.max((maximum - minimum) * 0.08, maximum * 0.001);
+      const low = minimum - padding, high = maximum + padding, range = Math.max(high - low, 0.000001);
+      const y = (price) => top + (high - price) * plotHeight / range;
+
+      ctx.fillStyle = '#0a101c';
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = '#243149'; ctx.lineWidth = 1; ctx.setLineDash([3, 5]);
+      ctx.font = '11px system-ui'; ctx.fillStyle = '#8fa0bd'; ctx.textAlign = 'left';
+      for (let grid = 0; grid <= 4; grid += 1) {
+        const gridY = top + plotHeight * grid / 4;
+        const price = high - range * grid / 4;
+        ctx.beginPath(); ctx.moveTo(left, gridY); ctx.lineTo(width - right, gridY); ctx.stroke();
+        ctx.fillText(price.toLocaleString(undefined, {maximumFractionDigits: 2}), width - right + 6, gridY + 4);
+      }
+      ctx.setLineDash([]);
+      const step = plotWidth / view.length, body = Math.max(1, step * 0.65);
+      view.forEach((candle, index) => {
+        const x = left + (index + 0.5) * step;
+        const colour = candle.close >= candle.open ? '#55d998' : '#ff7b8b';
+        const openY = y(candle.open), closeY = y(candle.close);
+        ctx.strokeStyle = colour; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y(candle.high)); ctx.lineTo(x, y(candle.low)); ctx.stroke();
+        ctx.fillStyle = colour;
+        ctx.fillRect(x - body / 2, Math.min(openY, closeY), body, Math.max(1, Math.abs(closeY - openY)));
+      });
+      payload.levels.forEach((line) => {
+        const lineY = y(line.price);
+        ctx.strokeStyle = line.colour; ctx.globalAlpha = line.kind === 'ENTRY' ? 1 : 0.75;
+        ctx.setLineDash(line.kind === 'ENTRY' ? [7, 5] : [2, 5]);
+        ctx.beginPath(); ctx.moveTo(left, lineY); ctx.lineTo(width - right, lineY); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = line.colour; ctx.textAlign = 'right';
+        ctx.fillText(`${line.kind} $${line.price.toLocaleString(undefined, {maximumFractionDigits: 2})}`, width - right - 4, lineY - 5);
+      });
+      ctx.fillStyle = '#8fa0bd'; ctx.textAlign = 'left';
+      ctx.fillText(view[0].time.slice(0, 16).replace('T', ' '), left, height - 9);
+      ctx.textAlign = 'right';
+      ctx.fillText(view[view.length - 1].time.slice(0, 16).replace('T', ' '), width - right, height - 9);
+      root.querySelector('.chart-controls strong').textContent = `Showing ${view.length} of ${candles.length} stored ${payload.symbol} candles`;
+    };
+
+    const point = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return {x: event.clientX - rect.left, y: event.clientY - rect.top, rect};
+    };
+    canvas.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const old = visible;
+      const next = clamp(Math.round(old * (event.deltaY < 0 ? 0.78 : 1.28)), Math.min(20, candles.length), candles.length);
+      const {x, rect} = point(event);
+      const focus = clamp((x - 12) / Math.max(1, rect.width - 80), 0, 1);
+      const start = end - old;
+      visible = next;
+      end = clamp(Math.round(start + focus * old + (1 - focus) * next), next, candles.length);
+      render();
+    }, {passive: false});
+    canvas.addEventListener('pointerdown', (event) => {
+      canvas.setPointerCapture(event.pointerId);
+      drag = {x: event.clientX, end};
+      tooltip.hidden = true;
+    });
+    canvas.addEventListener('pointermove', (event) => {
+      const {x, y: mouseY, rect} = point(event);
+      if (drag) {
+        const step = Math.max(1, (rect.width - 80) / visible);
+        end = clamp(Math.round(drag.end - (event.clientX - drag.x) / step), visible, candles.length);
+        render();
+        return;
+      }
+      const start = end - visible;
+      const index = clamp(start + Math.floor((x - 12) / Math.max(1, (rect.width - 80) / visible)), start, end - 1);
+      const candle = candles[index];
+      if (!candle || mouseY < 0 || mouseY > 410) { tooltip.hidden = true; return; }
+      tooltip.innerHTML = `<strong>${candle.time.slice(0, 16).replace('T', ' ')} UTC</strong><br>O $${candle.open.toLocaleString()} · H $${candle.high.toLocaleString()}<br>L $${candle.low.toLocaleString()} · C $${candle.close.toLocaleString()}`;
+      tooltip.style.left = `${clamp(x + 14, 8, rect.width - 190)}px`;
+      tooltip.style.top = `${clamp(mouseY + 14, 8, 340)}px`;
+      tooltip.hidden = false;
+    });
+    canvas.addEventListener('pointerup', () => { drag = null; });
+    canvas.addEventListener('pointerleave', () => { if (!drag) tooltip.hidden = true; });
+    root.querySelectorAll('[data-window]').forEach((button) => button.addEventListener('click', () => {
+      visible = button.dataset.window === 'full' ? candles.length : Math.min(candles.length, Number(button.dataset.window));
+      end = candles.length;
+      render();
+    }));
+    new ResizeObserver(render).observe(root);
+    render();
+  });
+})();
+</script>"""
 
 
 def _positions_page(cfg: Config, storage: Storage) -> str:
@@ -193,13 +287,13 @@ def _positions_page(cfg: Config, storage: Storage) -> str:
     for position in positions:
         by_symbol.setdefault(position["symbol"], []).append(position)
     chart_cards = "".join(
-        f"<section class='ticker-card'><div class='ticker-head'><div><span class='eyebrow'>OPEN PAPER POSITION</span><h2>{html.escape(symbol)}</h2><p>{len(symbol_positions)} active strategy position{'s' if len(symbol_positions) != 1 else ''} · last 60 completed {cfg.interval} candles</p></div><div class='last-price'>{_money(symbol_positions[0]['close'])}<span>last close</span></div></div>{_candlestick_chart(symbol, storage.market_candles(symbol), symbol_positions)}</section>"
+        f"<section class='ticker-card'><div class='ticker-head'><div><span class='eyebrow'>OPEN PAPER POSITION</span><h2>{html.escape(symbol)}</h2><p>{len(symbol_positions)} active strategy position{'s' if len(symbol_positions) != 1 else ''} · up to 180 completed {cfg.interval} candles</p></div><div class='last-price'>{_money(symbol_positions[0]['close'])}<span>last close</span></div></div>{_candlestick_chart(symbol, storage.market_candles(symbol), symbol_positions)}</section>"
         for symbol, symbol_positions in sorted(by_symbol.items())
     ) or "<section class='ticker-card'><p class='chart-empty'>No active paper positions to chart.</p></section>"
     return f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>Open Positions · Binance Paper Trading Lab</title><style>
-:root{{color-scheme:dark;--bg:#090d19;--panel:#111827;--line:#29364f;--text:#edf3ff;--muted:#94a3b8;--blue:#78a9ff;--green:#55d998;--red:#ff7b8b}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 20% -10%,#1b3059 0,transparent 36%),var(--bg);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}}main{{max-width:1240px;margin:auto;padding:34px 24px 48px}}a{{color:var(--blue);font-weight:700;text-decoration:none}}a:hover{{text-decoration:underline}}h1{{font-size:30px;letter-spacing:-.7px;margin:10px 0 6px}}h2{{font-size:22px;margin:5px 0}}p{{color:var(--muted);margin:0;line-height:1.55}}.badge,.eyebrow{{font-size:11px;font-weight:750;letter-spacing:.07em}}.badge{{display:inline-block;background:#123c2a;color:#75e6ae;border-radius:999px;padding:5px 9px}}.eyebrow{{color:#aebedc}}.top{{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:24px}}.ticker-card{{background:linear-gradient(145deg,#151f33,#111827);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:16px}}.ticker-head{{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:13px}}.last-price{{font-size:22px;font-weight:800;text-align:right}}.last-price span{{display:block;color:var(--muted);font-size:11px;font-weight:500;margin-top:3px}}.candle-chart{{display:block;width:100%;height:auto;background:#0a101c;border:1px solid #202c42;border-radius:10px}}.chart-bg{{fill:#0a101c}}.grid-line{{stroke:#25324a;stroke-width:1;stroke-dasharray:3 5}}.axis-text{{fill:#8fa0bd;font-size:10px}}.position-legend{{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:7px;color:var(--muted);font-size:12px}}.position-legend li{{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}}.position-legend i{{width:10px;height:10px;border-radius:50%;display:inline-block;flex:0 0 auto}}.position-legend strong{{color:var(--text)}}.positive{{color:var(--green)}}.negative{{color:var(--red)}}.neutral{{color:var(--muted)}}.chart-empty{{padding:28px 0}}.note{{margin-top:18px;border-left:3px solid #fbc96a;padding:10px 12px;background:#292313;color:#e9d6a3;font-size:12px;line-height:1.5}}@media(max-width:600px){{main{{padding:22px 14px}}.top,.ticker-head{{display:block}}.last-price{{text-align:left;margin-top:13px}}h1{{font-size:25px}}.ticker-card{{padding:14px}}}}
-</style></head><body><main><header class='top'><div><span class='badge'>PAPER MODE · LIVE ORDERS LOCKED</span><h1>Open position charts</h1><p>Real Binance Spot OHLC candles stored by the paper engine. All open strategy positions for the same ticker appear in one chart.</p></div><a href='index.html'>← Dashboard overview</a></header>{chart_cards}<p class='note'>Dashed line = entry; dotted line = stored paper stop. Charts use completed 4-hour candles, so they are not real-time execution charts or trading instructions.</p></main></body></html>"""
+:root{{color-scheme:dark;--bg:#090d19;--panel:#111827;--line:#29364f;--text:#edf3ff;--muted:#94a3b8;--blue:#78a9ff;--green:#55d998;--red:#ff7b8b}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 20% -10%,#1b3059 0,transparent 36%),var(--bg);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}}main{{max-width:1240px;margin:auto;padding:34px 24px 48px}}a{{color:var(--blue);font-weight:700;text-decoration:none}}a:hover{{text-decoration:underline}}h1{{font-size:30px;letter-spacing:-.7px;margin:10px 0 6px}}h2{{font-size:22px;margin:5px 0}}p{{color:var(--muted);margin:0;line-height:1.55}}.badge,.eyebrow{{font-size:11px;font-weight:750;letter-spacing:.07em}}.badge{{display:inline-block;background:#123c2a;color:#75e6ae;border-radius:999px;padding:5px 9px}}.eyebrow{{color:#aebedc}}.top{{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:24px}}.ticker-card{{background:linear-gradient(145deg,#151f33,#111827);border:1px solid var(--line);border-radius:16px;padding:18px;margin-top:16px}}.ticker-head{{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:13px}}.last-price{{font-size:22px;font-weight:800;text-align:right}}.last-price span{{display:block;color:var(--muted);font-size:11px;font-weight:500;margin-top:3px}}.chart-controls{{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 9px;color:var(--muted);font-size:12px}}.chart-controls strong{{display:block;color:var(--text);font-size:13px;margin-bottom:3px}}.chart-buttons{{display:flex;gap:6px}}.chart-buttons button{{border:1px solid #334463;background:#121d30;color:#b9ceef;border-radius:7px;padding:5px 9px;font:700 11px system-ui;cursor:pointer}}.chart-buttons button:hover{{background:#203355;color:#fff}}.chart-canvas-wrap{{position:relative;background:#0a101c;border:1px solid #202c42;border-radius:10px;overflow:hidden}}.chart-canvas-wrap canvas{{display:block;width:100%;touch-action:none;cursor:crosshair}}.chart-tooltip{{position:absolute;z-index:2;min-width:170px;padding:8px 9px;background:#111c30eF;border:1px solid #425575;border-radius:8px;color:#cbd8ee;font-size:11px;line-height:1.55;pointer-events:none;box-shadow:0 5px 18px #0008}}.chart-tooltip strong{{color:#fff}}.position-legend{{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:7px;color:var(--muted);font-size:12px}}.position-legend li{{display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}}.position-legend i{{width:10px;height:10px;border-radius:50%;display:inline-block;flex:0 0 auto}}.position-legend strong{{color:var(--text)}}.positive{{color:var(--green)}}.negative{{color:var(--red)}}.neutral{{color:var(--muted)}}.chart-empty{{padding:28px 0}}.note{{margin-top:18px;border-left:3px solid #fbc96a;padding:10px 12px;background:#292313;color:#e9d6a3;font-size:12px;line-height:1.5}}@media(max-width:600px){{main{{padding:22px 14px}}.top,.ticker-head{{display:block}}.last-price{{text-align:left;margin-top:13px}}.chart-controls{{align-items:flex-start;flex-direction:column}}h1{{font-size:25px}}.ticker-card{{padding:14px}}}}
+</style></head><body><main><header class='top'><div><span class='badge'>PAPER MODE · LIVE ORDERS LOCKED</span><h1>Open position charts</h1><p>Real Binance Spot OHLC candles stored by the paper engine. All open strategy positions for the same ticker appear in one chart.</p></div><a href='index.html'>← Dashboard overview</a></header>{chart_cards}<p class='note'>Entry and stop lines are drawn from stored paper positions. Charts use completed 4-hour candles, so they are not real-time execution charts or trading instructions.</p></main>{_interactive_chart_script()}</body></html>"""
 
 
 def serve(cfg: Config) -> None:
