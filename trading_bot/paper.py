@@ -21,6 +21,7 @@ def paper_cycle(cfg: Config, storage: Storage, market: BinanceMarketData) -> lis
         raw = raw[raw["close_time"] <= now].reset_index(drop=True)
         if len(raw) < 201:
             raise RuntimeError(f"Not enough completed candles for {symbol}")
+        storage.save_market_candles(symbol, raw)
         df = add_indicators(raw)
         i = len(df) - 1
         row = df.iloc[i]

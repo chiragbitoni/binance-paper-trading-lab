@@ -74,6 +74,16 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
   cvd_quote_24h REAL,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS market_candles (
+  symbol TEXT NOT NULL,
+  candle_time TEXT NOT NULL,
+  open REAL NOT NULL,
+  high REAL NOT NULL,
+  low REAL NOT NULL,
+  close REAL NOT NULL,
+  volume REAL NOT NULL,
+  PRIMARY KEY(symbol, candle_time)
+);
 """
 
 
@@ -196,3 +206,28 @@ class Storage:
         return [dict(row) for row in self.connection.execute(
             "SELECT * FROM market_snapshots ORDER BY symbol"
         )]
+
+    def save_market_candles(self, symbol: str, candles) -> None:
+        """Persist a compact completed-candle window for the position charts."""
+        window = candles.tail(180)
+        if window.empty:
+            return
+        first_time = str(window.iloc[0].open_time)
+        self.connection.execute(
+            "DELETE FROM market_candles WHERE symbol=? AND candle_time < ?", (symbol, first_time)
+        )
+        self.connection.executemany(
+            """INSERT INTO market_candles(symbol,candle_time,open,high,low,close,volume)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(symbol,candle_time) DO UPDATE SET open=excluded.open,high=excluded.high,
+              low=excluded.low,close=excluded.close,volume=excluded.volume""",
+            [(symbol, str(row.open_time), row.open, row.high, row.low, row.close, row.volume)
+             for row in window.itertuples(index=False)],
+        )
+        self.connection.commit()
+
+    def market_candles(self, symbol: str, limit: int = 60) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT * FROM market_candles WHERE symbol=? ORDER BY candle_time DESC LIMIT ?", (symbol, limit)
+        ).fetchall()
+        return [dict(row) for row in reversed(rows)]
