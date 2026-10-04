@@ -9,15 +9,15 @@
   "minimum_notional": 5.0,
   "history_days": 730,
   "enabled_strategies": [
+    "golden_cross"
+  ],
+  "research_only_strategies": [
     "trend_breakout",
     "slow_trend",
-    "golden_cross",
     "ema_trend",
     "volatility_breakout",
     "bollinger_rsi",
-    "buy_hold_benchmark"
-  ],
-  "research_only_strategies": [
+    "buy_hold_benchmark",
     "liquidity_sweep",
     "delta_liquidity_sweep",
     "delta_divergence"

@@ -66,7 +66,12 @@ class BinanceMarketData:
 
 
 class BinanceLiveClient:
-    """Signed Spot client. Order methods remain locked unless live mode is explicitly acknowledged."""
+    """Signed, read-only Spot account client used only for connectivity checks.
+
+    This project intentionally has no order-creation method.  Keeping the
+    capability out of the client makes the paper-only boundary enforceable in
+    code, rather than relying on an environment-variable acknowledgement.
+    """
 
     def __init__(self):
         self.api_key = os.getenv("BINANCE_API_KEY", "")
@@ -89,13 +94,6 @@ class BinanceLiveClient:
 
     def account(self) -> dict:
         return self._signed("GET", "/api/v3/account", {"omitZeroBalances": "true"})
-
-    def market_order(self, symbol: str, side: str, quantity: str) -> dict:
-        if os.getenv("LIVE_TRADING_ACK") != "I_UNDERSTAND_REAL_ORDERS":
-            raise RuntimeError("Live orders are locked. Set LIVE_TRADING_ACK only when deliberately enabling real trading.")
-        return self._signed("POST", "/api/v3/order", {
-            "symbol": symbol, "side": side, "type": "MARKET", "quantity": quantity
-        })
 
 
 def utc_now_ms() -> int:

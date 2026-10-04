@@ -13,8 +13,8 @@ A transparent, paper-first Binance Spot strategy research bot for five liquid US
 ## Highlights
 
 - Five parallel markets: BTC, ETH, BNB, SOL, and XRP against USDT
-- Multiple explainable strategies, plus research-only variants that are backtested but cannot create paper positions
-- Two-year historical backtests with fees, slippage, and next-candle execution
+- One forward-paper candidate (50/200 EMA regime) plus research-only variants that are backtested but cannot create paper positions
+- Two-year historical backtests and forward-paper signals with fees, slippage, and next-candle-open execution
 - Return, win rate, profit factor, trade count, and maximum drawdown tracking
 - Forward-paper positions and trades stored independently from backtests
 - Decision dashboard with portfolio equity, mark P&L, stops, candle delta, trade ledger, and research results
@@ -39,7 +39,7 @@ A transparent, paper-first Binance Spot strategy research bot for five liquid US
 | CVD divergence | Research-only: a new price low without a matching rolling-24h CVD low, then bullish confirmation |
 | Buy-and-hold benchmark | Baseline using the same position cap |
 
-The dashboard contains the latest saved results. Compare net return, drawdown, profit factor, and sample size together—win rate alone is not enough. Research-only strategies appear in historical results but cannot open a forward-paper account until explicitly promoted after review.
+The dashboard contains the latest saved results. Compare net return, drawdown, profit factor, and sample size together—win rate alone is not enough. Research-only strategies appear in historical results but cannot open a forward-paper account until explicitly promoted after review. The current forward-paper candidate is the 50/200 EMA regime; existing positions from retired candidates remain managed until their normal exit rule closes them, but cannot open again.
 
 ### Liquidity-sweep rule
 
@@ -90,6 +90,7 @@ python run.py paper --loop           Continuously watch for completed candles
 python run.py dashboard              Serve the local dashboard
 python run.py render-static          Rebuild docs/index.html for GitHub Pages
 python run.py check-live-connection  Test a read-only Binance connection
+python -m unittest discover -s tests -v  Run safety and configuration tests
 ```
 
 ## Automation
@@ -97,9 +98,10 @@ python run.py check-live-connection  Test a read-only Binance connection
 `.github/workflows/paper-trading.yml` runs 12 minutes after every four-hour Binance candle closes. Each run:
 
 1. Downloads current public Binance candle data.
-2. Updates every forward-paper account.
-3. Rebuilds the static dashboard.
-4. Commits the updated SQLite state and dashboard.
+2. Runs the paper-engine safety tests.
+3. Updates eligible forward-paper accounts and manages any retiring open position until it exits.
+4. Rebuilds the static dashboard and Positions page.
+5. Commits the updated SQLite state and pages.
 
 The workflow uses no Binance credentials and never invokes the live-order client.
 
@@ -119,7 +121,7 @@ python run.py check-live-connection
 - Restrict any account key to a trusted static IP.
 - Do not add real-account credentials to the public GitHub Actions workflow.
 
-The included signed client can check account connectivity. Its market-order method is locked behind `LIVE_TRADING_ACK=I_UNDERSTAND_REAL_ORDERS`, and the automated paper engine never calls it. A production deployment still requires quantity rounding, exchange-filter validation, persistent stop handling, reconciliation, alerts, loss limits, and a fixed-IP server.
+The included signed client can check account connectivity only; it contains no order-creation method. The automated engine supports paper mode only. A production deployment would require a separate, independently reviewed execution service with quantity rounding, exchange-filter validation, exchange-side stops, reconciliation, alerts, loss limits, and a fixed-IP server.
 
 ## Project structure
 

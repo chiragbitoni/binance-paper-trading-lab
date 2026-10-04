@@ -6,6 +6,7 @@ import pandas as pd
 
 from .config import Config
 from .indicators import add_indicators
+from .risk import advance_trailing_stop, stop_fill_price
 from .strategies import Strategy
 
 
@@ -42,32 +43,38 @@ def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config, symbol: str
             pending_entry_index = None
 
         if quantity > 0:
-            high_water = max(high_water, row.high)
-            if strategy.trailing_atr is not None:
-                stop_price = max(stop_price, high_water - strategy.trailing_atr * row.atr)
-            if row.low <= stop_price:
+            stop_fill = stop_fill_price(row.open, row.low, stop_price, cfg.slippage_rate)
+            if stop_fill is not None:
                 pending_exit = True
                 exit_reason = "stop"
-                exit_fill_override = min(row.open, stop_price) * (1 - cfg.slippage_rate)
+                exit_fill_override = stop_fill
             elif strategy.exit(df, i):
                 pending_exit = True
                 exit_reason = "signal"
                 exit_fill_override = None
+            else:
+                stop_price, high_water = advance_trailing_stop(
+                    stop_price, high_water, row.high, row.atr, strategy.trailing_atr
+                )
 
+        closed_this_bar = False
         if pending_exit and quantity > 0:
             if exit_reason == "stop":
                 fill = exit_fill_override
+                exit_time = str(row.open_time)
             elif i + 1 < len(df):
                 fill = df.iloc[i + 1].open * (1 - cfg.slippage_rate)
+                exit_time = str(df.iloc[i + 1].open_time)
             else:
                 fill = row.close * (1 - cfg.slippage_rate)
+                exit_time = str(row.close_time)
             proceeds = quantity * fill
             fee = proceeds * cfg.fee_rate
             net = proceeds - fee
             pnl = net - entry_cost
             cash += net
             trades.append({
-                "entry_time": entry_time, "exit_time": str(row.open_time), "entry_price": entry_price,
+                "entry_time": entry_time, "exit_time": exit_time, "entry_price": entry_price,
                 "exit_price": fill, "quantity": quantity, "pnl": pnl,
                 "pnl_pct": pnl / entry_cost * 100, "exit_reason": exit_reason,
             })
@@ -75,8 +82,9 @@ def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config, symbol: str
             entry_price = entry_cost = stop_price = high_water = 0.0
             entry_time = None
             pending_exit = False
+            closed_this_bar = True
 
-        if quantity == 0 and not pending_entry and strategy.entry(df, i):
+        if quantity == 0 and not pending_entry and not closed_this_bar and strategy.entry(df, i):
             pending_entry = True
             pending_entry_index = i
 

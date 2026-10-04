@@ -27,12 +27,22 @@ def load_config(path: str | Path = "config.json") -> Config:
     source = Path(path)
     raw = json.loads(source.read_text(encoding="utf-8"))
     cfg = Config(**raw)
-    if cfg.mode not in {"paper", "live"}:
-        raise ValueError("mode must be 'paper' or 'live'")
+    if cfg.mode != "paper":
+        raise ValueError("only paper mode is supported; live execution is intentionally not implemented")
     if cfg.starting_balance <= 0 or cfg.max_position_value <= 0:
         raise ValueError("balances must be positive")
+    if cfg.minimum_notional <= 0:
+        raise ValueError("minimum_notional must be positive")
+    if not 0 <= cfg.fee_rate < 1 or not 0 <= cfg.slippage_rate < 1:
+        raise ValueError("fee_rate and slippage_rate must be between 0 (inclusive) and 1 (exclusive)")
+    if cfg.history_days < 35:
+        raise ValueError("history_days must allow indicator warm-up")
     if not cfg.symbols or len(cfg.symbols) != len(set(cfg.symbols)):
         raise ValueError("symbols must contain at least one unique market")
     if set(cfg.enabled_strategies) & set(cfg.research_only_strategies):
         raise ValueError("a strategy cannot be both enabled and research-only")
+    from .strategies import STRATEGIES
+    unknown = set(cfg.enabled_strategies + cfg.research_only_strategies) - set(STRATEGIES)
+    if unknown:
+        raise ValueError(f"unknown strategy keys: {', '.join(sorted(unknown))}")
     return cfg

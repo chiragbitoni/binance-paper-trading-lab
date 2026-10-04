@@ -33,7 +33,10 @@ def _active_positions(cfg: Config, accounts: list[dict], snapshots: list[dict]) 
             position_value = account["quantity"] * close * (1 - cfg.fee_rate)
             account_equity = account["cash"] + position_value
             pnl = account_equity - cfg.starting_balance
-            positions.append({**account, "close": close, "equity": account_equity, "pnl": pnl})
+            positions.append({
+                **account, "close": close, "equity": account_equity, "pnl": pnl,
+                "forward_status": "candidate" if account["strategy_key"] in cfg.enabled_strategies else "retiring",
+            })
             marked_equity += account_equity
         else:
             marked_equity += account["cash"]
@@ -46,6 +49,7 @@ def _page(cfg: Config, storage: Storage) -> str:
     trades = storage.recent_paper_trades()
     snapshots = storage.market_snapshots()
     active_positions, marked_equity = _active_positions(cfg, accounts, snapshots)
+    pending_orders = [account for account in accounts if account.get("pending_order")]
     starting_equity = len(accounts) * cfg.starting_balance
     total_pnl = marked_equity - starting_equity
     realized_pnl = sum(trade["realized_pnl"] or 0.0 for trade in trades if trade["side"] == "SELL")
@@ -63,12 +67,22 @@ def _page(cfg: Config, storage: Storage) -> str:
     position_rows = "".join(
         f"<tr><td><strong>{html.escape(position['symbol'])}</strong></td>"
         f"<td>{html.escape(STRATEGIES[position['strategy_key']].name)}</td>"
+        f"<td><span class='tag {position['forward_status']}'>{position['forward_status']}</span></td>"
         f"<td>{_money(position['entry_price'])}</td><td>{_money(position['close'])}</td>"
         f"<td>{_money(position['stop_price'])}</td>"
         f"<td class='{_pnl_class(position['pnl'])}'>{_signed_money(position['pnl'])} ({position['pnl'] / cfg.starting_balance * 100:+.2f}%)</td>"
         f"<td>{_money(position['equity'])}</td></tr>"
         for position in active_positions
     ) or "<tr><td colspan='7'>No active paper positions.</td></tr>"
+
+    pending_rows = "".join(
+        f"<tr><td><strong>{html.escape(account['symbol'])}</strong></td>"
+        f"<td>{html.escape(STRATEGIES[account['strategy_key']].name)}</td>"
+        f"<td><span class='tag {'buy' if account['pending_order'] == 'entry' else 'sell'}>"
+        f"{'BUY' if account['pending_order'] == 'entry' else 'SELL'}</span></td>"
+        f"<td>Next completed candle open</td></tr>"
+        for account in pending_orders
+    ) or "<tr><td colspan='4'>No queued paper orders.</td></tr>"
 
     backtest_rows = "".join(
         f"<tr><td>{html.escape(result['symbol'])}</td>"
@@ -95,14 +109,15 @@ def _page(cfg: Config, storage: Storage) -> str:
 <title>Binance Paper Trading Lab</title><style>
 :root{{color-scheme:dark;--bg:#090d19;--panel:#111827;--panel2:#151f33;--line:#27344e;--text:#edf3ff;--muted:#94a3b8;--blue:#78a9ff;--green:#55d998;--red:#ff7b8b;--yellow:#fbc96a}}
 *{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 20% -10%,#1b3059 0,transparent 36%),var(--bg);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}}
-main{{max-width:1380px;margin:auto;padding:34px 24px 48px}}.top{{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:25px}}h1{{font-size:30px;letter-spacing:-.7px;margin:8px 0}}h2{{font-size:17px;margin:0 0 6px}}p{{color:var(--muted);line-height:1.55;margin:0}}.position-link{{display:inline-block;margin-top:12px;color:var(--blue);font-weight:700;text-decoration:none}}.position-link:hover{{text-decoration:underline}}.badge,.tag{{display:inline-block;border-radius:999px;font-size:11px;font-weight:750;letter-spacing:.06em;padding:5px 9px}}.badge{{background:#123c2a;color:#75e6ae}}.tag.buy{{background:#123c2a;color:#75e6ae}}.tag.sell{{background:#4a1f2b;color:#ff9aa8}}.updated{{font-size:12px;color:var(--muted);text-align:right}}.updated strong{{color:var(--text);display:block;font-size:13px;margin-top:4px}}
+main{{max-width:1380px;margin:auto;padding:34px 24px 48px}}.top{{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:25px}}h1{{font-size:30px;letter-spacing:-.7px;margin:8px 0}}h2{{font-size:17px;margin:0 0 6px}}p{{color:var(--muted);line-height:1.55;margin:0}}.position-link{{display:inline-block;margin-top:12px;color:var(--blue);font-weight:700;text-decoration:none}}.position-link:hover{{text-decoration:underline}}.badge,.tag{{display:inline-block;border-radius:999px;font-size:11px;font-weight:750;letter-spacing:.06em;padding:5px 9px}}.badge{{background:#123c2a;color:#75e6ae}}.tag.buy,.tag.candidate{{background:#123c2a;color:#75e6ae}}.tag.sell,.tag.retiring{{background:#4a1f2b;color:#ff9aa8}}.updated{{font-size:12px;color:var(--muted);text-align:right}}.updated strong{{color:var(--text);display:block;font-size:13px;margin-top:4px}}
 .metrics{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}}.metric,.section{{background:linear-gradient(145deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:16px}}.metric{{padding:18px}}.metric-label{{font-size:12px;color:var(--muted);font-weight:650;text-transform:uppercase;letter-spacing:.06em}}.metric-value{{font-size:25px;font-weight:750;letter-spacing:-.5px;margin:8px 0 4px}}.metric-note{{font-size:12px;color:var(--muted)}}.positive{{color:var(--green)}}.negative{{color:var(--red)}}.neutral{{color:var(--muted)}}
 .section{{padding:18px;margin-top:16px;overflow:hidden}}.section-head{{display:flex;justify-content:space-between;gap:18px;align-items:baseline;margin-bottom:14px}}.section-head p{{font-size:12px;max-width:730px}}.table-wrap{{overflow-x:auto}}table{{width:100%;border-collapse:collapse;white-space:nowrap}}th,td{{padding:11px 10px;text-align:left;border-bottom:1px solid var(--line)}}th{{font-size:11px;color:var(--blue);text-transform:uppercase;letter-spacing:.06em}}td{{font-variant-numeric:tabular-nums}}tr:last-child td{{border-bottom:0}}.footnote{{margin-top:17px;border-left:3px solid var(--yellow);padding:10px 12px;background:#292313;color:#e9d6a3;font-size:12px;line-height:1.5}}
 @media(max-width:900px){{.metrics{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}@media(max-width:620px){{main{{padding:22px 14px}}.top{{display:block}}.updated{{text-align:left;margin-top:16px}}.metrics{{grid-template-columns:1fr 1fr;gap:9px}}.metric{{padding:14px}}.metric-value{{font-size:20px}}.section{{padding:14px}}h1{{font-size:25px}}}}
 </style></head><body><main>
-<header class='top'><div><span class='badge'>PAPER MODE · LIVE ORDERS LOCKED</span><h1>Binance Strategy Lab</h1><p>{', '.join(cfg.symbols)} · completed {cfg.interval} candles · isolated $10 strategy accounts</p><p><a class='position-link' href='positions.html'>View candlestick position charts →</a></p></div><div class='updated'>Last processed candle<strong>{html.escape(str(snapshot_updated))}</strong></div></header>
-<div class='metrics'><article class='metric'><div class='metric-label'>Paper equity</div><div class='metric-value'>{_money(marked_equity)}</div><div class='metric-note'>Across {len(accounts)} isolated accounts</div></article><article class='metric'><div class='metric-label'>Forward P&amp;L</div><div class='metric-value {_pnl_class(total_pnl)}'>{_signed_money(total_pnl)}</div><div class='metric-note'>Marked using latest completed candle</div></article><article class='metric'><div class='metric-label'>Active positions</div><div class='metric-value'>{len(active_positions)}</div><div class='metric-note'>of {len(accounts)} paper accounts</div></article><article class='metric'><div class='metric-label'>Realized P&amp;L</div><div class='metric-value {_pnl_class(realized_pnl)}'>{_signed_money(realized_pnl)}</div><div class='metric-note'>{sum(1 for trade in trades if trade['side'] == 'SELL')} closed trades</div></article></div>
-<section class='section'><div class='section-head'><div><h2>Open paper positions</h2><p>Forward-paper positions only. Mark P&amp;L includes an estimated fee for closing at the latest completed 4h close.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Entry</th><th>Last close</th><th>Stop</th><th>Unrealized P&amp;L</th><th>Marked equity</th></tr></thead><tbody>{position_rows}</tbody></table></div></section>
+<header class='top'><div><span class='badge'>PAPER MODE · LIVE ORDERS LOCKED</span><h1>Binance Strategy Lab</h1><p>{', '.join(cfg.symbols)} · completed {cfg.interval} candles · isolated $10 strategy accounts</p><p><a class='position-link' href='positions.html'>View candlestick position charts →</a></p></div><div class='updated'>Last database update (UTC)<strong>{html.escape(str(snapshot_updated))}</strong></div></header>
+<div class='metrics'><article class='metric'><div class='metric-label'>Paper equity</div><div class='metric-value'>{_money(marked_equity)}</div><div class='metric-note'>Across {len(accounts)} isolated accounts</div></article><article class='metric'><div class='metric-label'>Forward P&amp;L</div><div class='metric-value {_pnl_class(total_pnl)}'>{_signed_money(total_pnl)}</div><div class='metric-note'>Marked using latest completed candle</div></article><article class='metric'><div class='metric-label'>Active positions</div><div class='metric-value'>{len(active_positions)}</div><div class='metric-note'>{len(pending_orders)} queued order{'s' if len(pending_orders) != 1 else ''}</div></article><article class='metric'><div class='metric-label'>Realized P&amp;L</div><div class='metric-value {_pnl_class(realized_pnl)}'>{_signed_money(realized_pnl)}</div><div class='metric-note'>{sum(1 for trade in trades if trade['side'] == 'SELL')} closed trades</div></article></div>
+<section class='section'><div class='section-head'><div><h2>Open paper positions</h2><p>Forward-paper positions only. Mark P&amp;L includes an estimated fee for closing at the latest completed 4h close. Retiring strategies cannot open again but keep their exit protection until closed.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Status</th><th>Entry</th><th>Last close</th><th>Stop</th><th>Unrealized P&amp;L</th><th>Marked equity</th></tr></thead><tbody>{position_rows}</tbody></table></div></section>
+<section class='section'><div class='section-head'><div><h2>Queued paper orders</h2><p>A completed-candle signal does not fill immediately. It is recorded here and filled at the next completed candle's open, unless it is cancelled by an earlier protective exit.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Order</th><th>Planned fill</th></tr></thead><tbody>{pending_rows}</tbody></table></div></section>
 <section class='section'><div class='section-head'><div><h2>Latest candle delta</h2><p>Binance Spot taker-volume proxy. Positive means relatively more taker-buy volume; 24h CVD sums six 4h candle deltas.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Close</th><th>Delta ratio</th><th>Candle delta (USDT)</th><th>24h CVD (USDT)</th><th>Candle open</th></tr></thead><tbody>{snapshot_rows}</tbody></table></div></section>
 <section class='section'><div class='section-head'><div><h2>Forward trade ledger</h2><p>Actual simulated entries and exits—not historical backtest trades.</p></div></div><div class='table-wrap'><table><thead><tr><th>Recorded</th><th>Market</th><th>Strategy</th><th>Side</th><th>Price</th><th>Quantity</th><th>Realized P&amp;L</th><th>Reason</th></tr></thead><tbody>{trade_rows}</tbody></table></div></section>
 <section class='section'><div class='section-head'><div><h2>Strategy laboratory</h2><p>Historical two-year backtests. Research-only strategies are displayed here but cannot open paper positions.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Return</th><th>Trades</th><th>W/L</th><th>Win rate</th><th>Profit factor</th><th>Max drawdown</th></tr></thead><tbody>{backtest_rows}</tbody></table></div><div class='footnote'>Historical results are not a forecast. Do not use the dashboard as a live-trading instruction; it is a paper-trading research record.</div></section>

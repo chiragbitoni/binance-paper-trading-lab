@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS paper_accounts (
   entry_price REAL,
   stop_price REAL,
   high_water REAL,
+  pending_order TEXT,
   last_candle_time TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY(symbol, strategy_key)
@@ -113,6 +114,9 @@ class Storage:
             FROM paper_accounts_single_symbol;
             DROP TABLE paper_accounts_single_symbol;
             """)
+        account_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(paper_accounts)")}
+        if "pending_order" not in account_columns:
+            self.connection.execute("ALTER TABLE paper_accounts ADD COLUMN pending_order TEXT")
         trade_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(paper_trades)")}
         if "symbol" not in trade_columns:
             self.connection.execute("ALTER TABLE paper_trades ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTCUSDT'")
@@ -167,10 +171,11 @@ class Storage:
 
     def update_paper_account(self, account: dict) -> None:
         self.connection.execute(
-            """UPDATE paper_accounts SET cash=?,quantity=?,entry_price=?,stop_price=?,high_water=?,
+            """UPDATE paper_accounts SET cash=?,quantity=?,entry_price=?,stop_price=?,high_water=?,pending_order=?,
             last_candle_time=?,updated_at=CURRENT_TIMESTAMP WHERE symbol=? AND strategy_key=?""",
             (account["cash"], account["quantity"], account.get("entry_price"), account.get("stop_price"),
-             account.get("high_water"), account.get("last_candle_time"), account["symbol"], account["strategy_key"]),
+             account.get("high_water"), account.get("pending_order"), account.get("last_candle_time"),
+             account["symbol"], account["strategy_key"]),
         )
         self.connection.commit()
 
