@@ -49,5 +49,6 @@ def add_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     # Six four-hour candles make a rolling 24-hour CVD, shown for context on
     # the dashboard.  It is not a full tick-by-tick or multi-exchange CVD.
     df["cvd_quote_24h"] = df["delta_quote"].rolling(6).sum()
+    df["prior_cvd_24h_low_20"] = df["cvd_quote_24h"].shift(1).rolling(20).min()
     df["atr_ratio_q30"] = df["atr_ratio"].shift(1).rolling(100).quantile(0.30)
     return df

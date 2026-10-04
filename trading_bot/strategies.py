@@ -156,6 +156,40 @@ def delta_liquidity_sweep_entry(df: pd.DataFrame, i: int) -> bool:
     return row.delta_ratio >= 0.10 and row.delta_quote >= row.delta_quote_abs_median_20
 
 
+def delta_divergence_entry(df: pd.DataFrame, i: int) -> bool:
+    """Independent long-only CVD-divergence setup, without a sweep requirement.
+
+    The previous candle must make a fresh 20-candle price low while the rolling
+    24-hour CVD does not make a matching low.  A subsequent bullish candle that
+    closes above the divergence candle high confirms the entry.  The EMA filter
+    keeps the Spot-only implementation aligned with the wider trend.
+    """
+    if i < 2 or not _valid(df, i, ["ema200", "atr"]):
+        return False
+    divergence = df.iloc[i - 1]
+    confirm = df.iloc[i]
+    if pd.isna(divergence.prior_low_20) or pd.isna(divergence.prior_cvd_24h_low_20):
+        return False
+    price_makes_new_low = divergence.low < divergence.prior_low_20
+    cvd_holds_higher = divergence.cvd_quote_24h > divergence.prior_cvd_24h_low_20
+    return (
+        price_makes_new_low
+        and cvd_holds_higher
+        and confirm.close > confirm.ema200
+        and confirm.close > confirm.open
+        and confirm.close > divergence.high
+    )
+
+
+def delta_divergence_exit(df: pd.DataFrame, i: int) -> bool:
+    return _valid(df, i, ["ema20"]) and df.iloc[i].close < df.iloc[i].ema20
+
+
+def delta_divergence_initial_stop(df: pd.DataFrame, i: int, fill: float) -> float:
+    divergence = df.iloc[i - 1]
+    return min(divergence.low - 0.25 * divergence.atr, fill - 0.5 * divergence.atr)
+
+
 def buy_hold_entry(df: pd.DataFrame, i: int) -> bool:
     return i == 200
 
@@ -187,10 +221,14 @@ STRATEGIES: dict[str, Strategy] = {
                                  "Buys a 20-candle low sweep only after a 4h reclaim and confirmation above the sweep high.",
                                  liquidity_sweep_entry, liquidity_sweep_exit, 2.0, None,
                                  liquidity_sweep_initial_stop),
-    "delta_liquidity_sweep": Strategy("delta_liquidity_sweep", "Delta-confirmed sweep (research-only)",
+    "delta_liquidity_sweep": Strategy("delta_liquidity_sweep", "Sweep + delta combo (research-only)",
                                        "Adds positive taker-volume delta and above-median flow to the liquidity-sweep reclaim.",
                                        delta_liquidity_sweep_entry, liquidity_sweep_exit, 2.0, None,
                                        liquidity_sweep_initial_stop),
+    "delta_divergence": Strategy("delta_divergence", "CVD divergence (research-only)",
+                                  "Independent price/CVD divergence: a new price low without a matching 24h CVD low, then bullish confirmation.",
+                                  delta_divergence_entry, delta_divergence_exit, 2.0, None,
+                                  delta_divergence_initial_stop),
     "buy_hold_benchmark": Strategy("buy_hold_benchmark", "Buy-and-hold benchmark",
                                    "Buys once at the common warm-up point and holds to the test end.",
                                    buy_hold_entry, never_exit, 1000.0, None),
