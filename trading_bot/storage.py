@@ -85,6 +85,68 @@ CREATE TABLE IF NOT EXISTS market_candles (
   volume REAL NOT NULL,
   PRIMARY KEY(symbol, candle_time)
 );
+CREATE TABLE IF NOT EXISTS futures_wallet (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  cash REAL NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS futures_position (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL CHECK(side IN ('LONG','SHORT')),
+  quantity REAL NOT NULL,
+  entry_price REAL NOT NULL,
+  stop_price REAL NOT NULL,
+  take_profit REAL NOT NULL,
+  margin REAL NOT NULL,
+  high_water REAL NOT NULL,
+  low_water REAL NOT NULL,
+  entry_time TEXT NOT NULL,
+  last_candle_time TEXT,
+  last_funding_time INTEGER,
+  funding_paid REAL NOT NULL DEFAULT 0,
+  pending_exit INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS futures_pending_order (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL CHECK(side IN ('LONG','SHORT')),
+  signal_time TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS futures_trades (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  symbol TEXT NOT NULL,
+  side TEXT NOT NULL,
+  action TEXT NOT NULL,
+  price REAL NOT NULL,
+  quantity REAL NOT NULL,
+  margin REAL NOT NULL,
+  fee REAL NOT NULL,
+  realized_pnl REAL,
+  funding_paid REAL NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL,
+  candle_time TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS futures_snapshots (
+  symbol TEXT PRIMARY KEY,
+  candle_time TEXT NOT NULL,
+  close REAL NOT NULL,
+  mark_price REAL,
+  funding_rate REAL,
+  next_funding_time INTEGER,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS futures_candles (
+  symbol TEXT NOT NULL,
+  candle_time TEXT NOT NULL,
+  open REAL NOT NULL,
+  high REAL NOT NULL,
+  low REAL NOT NULL,
+  close REAL NOT NULL,
+  volume REAL NOT NULL,
+  PRIMARY KEY(symbol, candle_time)
+);
 """
 
 
@@ -234,5 +296,103 @@ class Storage:
     def market_candles(self, symbol: str, limit: int = 180) -> list[dict]:
         rows = self.connection.execute(
             "SELECT * FROM market_candles WHERE symbol=? ORDER BY candle_time DESC LIMIT ?", (symbol, limit)
+        ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def initialize_futures_wallet(self, starting_balance: float) -> None:
+        self.connection.execute("INSERT OR IGNORE INTO futures_wallet(id,cash) VALUES (1,?)", (starting_balance,))
+        self.connection.commit()
+
+    def futures_wallet(self) -> dict:
+        row = self.connection.execute("SELECT * FROM futures_wallet WHERE id=1").fetchone()
+        if row is None:
+            raise RuntimeError("futures wallet has not been initialized")
+        return dict(row)
+
+    def set_futures_wallet(self, cash: float) -> None:
+        self.connection.execute("UPDATE futures_wallet SET cash=?,updated_at=CURRENT_TIMESTAMP WHERE id=1", (cash,))
+        self.connection.commit()
+
+    def futures_position(self) -> dict | None:
+        row = self.connection.execute("SELECT * FROM futures_position WHERE id=1").fetchone()
+        return dict(row) if row else None
+
+    def save_futures_position(self, position: dict) -> None:
+        fields = ("symbol", "side", "quantity", "entry_price", "stop_price", "take_profit", "margin",
+                  "high_water", "low_water", "entry_time", "last_candle_time", "last_funding_time",
+                  "funding_paid", "pending_exit")
+        values = tuple(position.get(field) for field in fields)
+        self.connection.execute(
+            f"INSERT INTO futures_position(id,{','.join(fields)}) VALUES (1,{','.join('?' for _ in fields)}) "
+            f"ON CONFLICT(id) DO UPDATE SET {','.join(f'{field}=excluded.{field}' for field in fields)}", values
+        )
+        self.connection.commit()
+
+    def clear_futures_position(self) -> None:
+        self.connection.execute("DELETE FROM futures_position WHERE id=1")
+        self.connection.commit()
+
+    def futures_pending_order(self) -> dict | None:
+        row = self.connection.execute("SELECT * FROM futures_pending_order WHERE id=1").fetchone()
+        return dict(row) if row else None
+
+    def set_futures_pending_order(self, symbol: str, side: str, signal_time: str) -> None:
+        self.connection.execute(
+            "INSERT INTO futures_pending_order(id,symbol,side,signal_time) VALUES (1,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET symbol=excluded.symbol,side=excluded.side,signal_time=excluded.signal_time",
+            (symbol, side, signal_time),
+        )
+        self.connection.commit()
+
+    def clear_futures_pending_order(self) -> None:
+        self.connection.execute("DELETE FROM futures_pending_order WHERE id=1")
+        self.connection.commit()
+
+    def save_futures_trade(self, trade: dict) -> None:
+        fields = ("symbol", "side", "action", "price", "quantity", "margin", "fee", "realized_pnl",
+                  "funding_paid", "reason", "candle_time")
+        self.connection.execute(
+            f"INSERT INTO futures_trades({','.join(fields)}) VALUES ({','.join('?' for _ in fields)})",
+            tuple(trade.get(field) for field in fields),
+        )
+        self.connection.commit()
+
+    def recent_futures_trades(self, limit: int = 50) -> list[dict]:
+        return [dict(row) for row in self.connection.execute(
+            "SELECT * FROM futures_trades ORDER BY id DESC LIMIT ?", (limit,)
+        )]
+
+    def save_futures_snapshot(self, snapshot: dict) -> None:
+        self.connection.execute(
+            """INSERT INTO futures_snapshots(symbol,candle_time,close,mark_price,funding_rate,next_funding_time)
+            VALUES (?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET candle_time=excluded.candle_time,
+            close=excluded.close,mark_price=excluded.mark_price,funding_rate=excluded.funding_rate,
+            next_funding_time=excluded.next_funding_time,updated_at=CURRENT_TIMESTAMP""",
+            (snapshot["symbol"], snapshot["candle_time"], snapshot["close"], snapshot.get("mark_price"),
+             snapshot.get("funding_rate"), snapshot.get("next_funding_time")),
+        )
+        self.connection.commit()
+
+    def futures_snapshots(self) -> list[dict]:
+        return [dict(row) for row in self.connection.execute("SELECT * FROM futures_snapshots ORDER BY symbol")]
+
+    def save_futures_candles(self, symbol: str, candles) -> None:
+        window = candles.tail(180)
+        if window.empty:
+            return
+        first_time = str(window.iloc[0].open_time)
+        self.connection.execute("DELETE FROM futures_candles WHERE symbol=? AND candle_time < ?", (symbol, first_time))
+        self.connection.executemany(
+            """INSERT INTO futures_candles(symbol,candle_time,open,high,low,close,volume) VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(symbol,candle_time) DO UPDATE SET open=excluded.open,high=excluded.high,low=excluded.low,
+            close=excluded.close,volume=excluded.volume""",
+            [(symbol, str(row.open_time), row.open, row.high, row.low, row.close, row.volume)
+             for row in window.itertuples(index=False)],
+        )
+        self.connection.commit()
+
+    def futures_candles(self, symbol: str, limit: int = 180) -> list[dict]:
+        rows = self.connection.execute(
+            "SELECT * FROM futures_candles WHERE symbol=? ORDER BY candle_time DESC LIMIT ?", (symbol, limit)
         ).fetchall()
         return [dict(row) for row in reversed(rows)]

@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 from .backtest import run_backtest
 from .config import load_config
 from .dashboard import render_static, serve
-from .market import BinanceLiveClient, BinanceMarketData
+from .futures import futures_paper_cycle, render_futures_static
+from .market import BinanceFuturesMarketData, BinanceLiveClient, BinanceMarketData
 from .paper import paper_cycle, paper_loop
 from .storage import Storage
 from .strategies import STRATEGIES
@@ -19,9 +20,12 @@ def main() -> None:
     sub.add_parser("backtest")
     paper = sub.add_parser("paper")
     paper.add_argument("--loop", action="store_true")
+    sub.add_parser("futures-paper")
     sub.add_parser("dashboard")
     static = sub.add_parser("render-static")
     static.add_argument("--output", default="docs/index.html")
+    futures_static = sub.add_parser("render-futures-static")
+    futures_static.add_argument("--output", default="docs/futures.html")
     sub.add_parser("check-live-connection")
     args = parser.parse_args()
     cfg = load_config(args.config)
@@ -32,6 +36,10 @@ def main() -> None:
     if args.command == "render-static":
         render_static(cfg, args.output)
         print(f"Static dashboard written to {args.output}")
+        return
+    if args.command == "render-futures-static":
+        render_futures_static(cfg, args.output)
+        print(f"Static futures paper dashboard written to {args.output}")
         return
     if args.command == "check-live-connection":
         client = BinanceLiveClient()
@@ -63,6 +71,9 @@ def main() -> None:
             else:
                 messages = paper_cycle(cfg, storage, market)
                 print("\n".join(messages) if messages else "Paper accounts updated; no new signals.")
+        elif args.command == "futures-paper":
+            messages = futures_paper_cycle(cfg, storage, BinanceFuturesMarketData())
+            print("\n".join(messages) if messages else "Futures paper wallet updated; no new signals.")
     finally:
         storage.close()
 

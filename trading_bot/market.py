@@ -16,6 +16,7 @@ SPOT_API = "https://api.binance.com"
 # main trading API may return HTTP 451. It exposes klines/exchangeInfo only and
 # never accepts account credentials or orders.
 MARKET_DATA_API = "https://data-api.binance.vision"
+FUTURES_MARKET_DATA_API = "https://fapi.binance.com"
 
 
 class BinanceMarketData:
@@ -94,6 +95,45 @@ class BinanceLiveClient:
 
     def account(self) -> dict:
         return self._signed("GET", "/api/v3/account", {"omitZeroBalances": "true"})
+
+
+class BinanceFuturesMarketData:
+    """Public USD-M Futures market data only.
+
+    This client intentionally has no authenticated endpoints and no order
+    method.  It supplies data for the separate simulated Futures lab only.
+    """
+
+    def __init__(self, timeout: int = 15):
+        self.timeout = timeout
+        self.session = requests.Session()
+
+    def candles(self, symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
+        response = self.session.get(
+            f"{FUTURES_MARKET_DATA_API}/fapi/v1/klines",
+            params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=self.timeout,
+        )
+        response.raise_for_status()
+        columns = ["open_time", "open", "high", "low", "close", "volume", "close_time",
+                   "quote_volume", "trades", "taker_base", "taker_quote", "ignore"]
+        frame = pd.DataFrame(response.json(), columns=columns)
+        if frame.empty:
+            return frame
+        numeric = ["open", "high", "low", "close", "volume", "quote_volume", "taker_base", "taker_quote"]
+        frame[numeric] = frame[numeric].astype(float)
+        frame["open_time"] = pd.to_datetime(frame["open_time"], unit="ms", utc=True)
+        frame["close_time"] = pd.to_datetime(frame["close_time"], unit="ms", utc=True)
+        frame["trades"] = frame["trades"].astype(int)
+        return frame.drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
+
+    def premium_index(self, symbol: str) -> dict:
+        response = self.session.get(
+            f"{FUTURES_MARKET_DATA_API}/fapi/v1/premiumIndex", params={"symbol": symbol}, timeout=self.timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return {"mark_price": float(payload["markPrice"]), "funding_rate": float(payload["lastFundingRate"]),
+                "next_funding_time": int(payload["nextFundingTime"])}
 
 
 def utc_now_ms() -> int:

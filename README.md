@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Automated](https://img.shields.io/badge/GitHub%20Actions-every%204h-2088FF?logo=githubactions&logoColor=white)](https://github.com/chiragbitoni/binance-paper-trading-lab/actions)
 
-A transparent, paper-first Binance Spot strategy research bot for five liquid USDT markets. It backtests multiple rule-based strategies, tracks isolated forward-paper accounts for every market/strategy pair, stores win/loss statistics in SQLite, and publishes a static dashboard after every completed four-hour candle.
+A transparent, paper-first Binance strategy research bot for five liquid USDT markets. It backtests multiple rule-based Spot strategies, tracks isolated forward-paper accounts, and includes a separate capped-leverage Futures *simulation* with no account connection or order capability.
 
 **[Open the live paper-trading dashboard](https://chiragbitoni.github.io/binance-paper-trading-lab/)**
 
@@ -19,6 +19,8 @@ A transparent, paper-first Binance Spot strategy research bot for five liquid US
 - Forward-paper positions and trades stored independently from backtests
 - Decision dashboard with portfolio equity, mark P&L, stops, candle delta, trade ledger, and research results
 - Dedicated candlestick chart page that groups all open strategy positions for each ticker
+- TradingView-style chart overlays: EMA 20/50/200, 20-candle support/resistance, entry, stop, and green/red risk-reward areas
+- Separate USD-M Futures paper lab: long/short setup research, a single shared simulated wallet, 3× maximum simulated leverage, ATR stops/targets, and public funding/mark context
 - Binance market-data-only API; no credentials required for paper mode
 - Automated four-hour updates through GitHub Actions
 - Lightweight dashboard published through GitHub Pages
@@ -59,6 +61,7 @@ cd binance-paper-trading-lab
 python -m pip install -r requirements.txt
 python run.py backtest
 python run.py paper
+python run.py futures-paper
 python run.py dashboard
 ```
 
@@ -78,6 +81,7 @@ Edit `config.json` to change the symbol, candle interval, simulated balance, pos
 - Maximum position: `$8`
 - Minimum notional: `$5`
 - Historical window: `730` days
+- Futures simulation: one `$10` shared wallet, `$5` simulated margin per attempt, maximum `3x` notional, and a separate `4h` watchlist
 
 Backtest statistics and forward-paper results are intentionally stored separately in `data/trading_bot.db`.
 
@@ -87,8 +91,10 @@ Backtest statistics and forward-paper results are intentionally stored separatel
 python run.py backtest               Run historical strategy tests
 python run.py paper                  Process the newest completed candle once
 python run.py paper --loop           Continuously watch for completed candles
+python run.py futures-paper          Process the capped Futures paper lab once
 python run.py dashboard              Serve the local dashboard
 python run.py render-static          Rebuild docs/index.html for GitHub Pages
+python run.py render-futures-static  Rebuild docs/futures.html for GitHub Pages
 python run.py check-live-connection  Test a read-only Binance connection
 python -m unittest discover -s tests -v  Run safety and configuration tests
 ```
@@ -99,11 +105,11 @@ python -m unittest discover -s tests -v  Run safety and configuration tests
 
 1. Downloads current public Binance candle data.
 2. Runs the paper-engine safety tests.
-3. Updates eligible forward-paper accounts and manages any retiring open position until it exits.
-4. Rebuilds the static dashboard and Positions page.
+3. Updates eligible Spot paper accounts and the separate capped Futures paper simulation.
+4. Rebuilds the static dashboard, Positions page, and Futures Paper Lab.
 5. Commits the updated SQLite state and pages.
 
-The workflow uses no Binance credentials and never invokes the live-order client.
+The workflow uses no Binance credentials and never invokes a live-order client. The Futures component uses public USD-M candles and mark/funding data only; it cannot submit a futures order.
 
 ## Security and optional Binance connectivity
 
@@ -136,4 +142,4 @@ run.py           Command-line entry point
 
 ## Risk notice
 
-Trading can lose money. Backtests are sensitive to market regime, assumptions, execution quality, fees, and overfitting. Validate strategies with a meaningful forward-paper sample before considering real capital, and avoid leverage while testing.
+Trading can lose money. Backtests are sensitive to market regime, assumptions, execution quality, fees, funding, and overfitting. The Futures panel is only a simplified paper simulation—not a Binance liquidation or margin model. Validate strategies with a meaningful forward-paper sample before considering real capital; do not transfer its settings to a live leveraged account.

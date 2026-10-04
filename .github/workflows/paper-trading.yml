@@ -47,14 +47,19 @@ jobs:
       - name: Process latest completed candle
         run: python run.py paper
 
+      - name: Process Futures paper lab
+        run: python run.py futures-paper
+
       - name: Build static dashboard
-        run: python run.py render-static
+        run: |
+          python run.py render-static
+          python run.py render-futures-static
 
       - name: Save updated state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/trading_bot.db docs/index.html docs/positions.html
+          git add data/trading_bot.db docs/index.html docs/positions.html docs/futures.html
           if git diff --cached --quiet; then
             echo "No state change to save"
           else

@@ -5,7 +5,10 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pandas as pd
+
 from .config import Config
+from .indicators import add_indicators
 from .storage import Storage
 from .strategies import STRATEGIES
 
@@ -114,7 +117,7 @@ main{{max-width:1380px;margin:auto;padding:34px 24px 48px}}.top{{display:flex;ju
 .section{{padding:18px;margin-top:16px;overflow:hidden}}.section-head{{display:flex;justify-content:space-between;gap:18px;align-items:baseline;margin-bottom:14px}}.section-head p{{font-size:12px;max-width:730px}}.table-wrap{{overflow-x:auto}}table{{width:100%;border-collapse:collapse;white-space:nowrap}}th,td{{padding:11px 10px;text-align:left;border-bottom:1px solid var(--line)}}th{{font-size:11px;color:var(--blue);text-transform:uppercase;letter-spacing:.06em}}td{{font-variant-numeric:tabular-nums}}tr:last-child td{{border-bottom:0}}.footnote{{margin-top:17px;border-left:3px solid var(--yellow);padding:10px 12px;background:#292313;color:#e9d6a3;font-size:12px;line-height:1.5}}
 @media(max-width:900px){{.metrics{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}@media(max-width:620px){{main{{padding:22px 14px}}.top{{display:block}}.updated{{text-align:left;margin-top:16px}}.metrics{{grid-template-columns:1fr 1fr;gap:9px}}.metric{{padding:14px}}.metric-value{{font-size:20px}}.section{{padding:14px}}h1{{font-size:25px}}}}
 </style></head><body><main>
-<header class='top'><div><span class='badge'>PAPER MODE · LIVE ORDERS LOCKED</span><h1>Binance Strategy Lab</h1><p>{', '.join(cfg.symbols)} · completed {cfg.interval} candles · isolated $10 strategy accounts</p><p><a class='position-link' href='positions.html'>View candlestick position charts →</a></p></div><div class='updated'>Last database update (UTC)<strong>{html.escape(str(snapshot_updated))}</strong></div></header>
+<header class='top'><div><span class='badge'>PAPER MODE · LIVE ORDERS LOCKED</span><h1>Binance Strategy Lab</h1><p>{', '.join(cfg.symbols)} · completed {cfg.interval} candles · isolated $10 strategy accounts</p><p><a class='position-link' href='positions.html'>View spot position charts →</a> &nbsp; <a class='position-link' href='futures.html'>Open Futures Paper Lab →</a></p></div><div class='updated'>Last database update (UTC)<strong>{html.escape(str(snapshot_updated))}</strong></div></header>
 <div class='metrics'><article class='metric'><div class='metric-label'>Paper equity</div><div class='metric-value'>{_money(marked_equity)}</div><div class='metric-note'>Across {len(accounts)} isolated accounts</div></article><article class='metric'><div class='metric-label'>Forward P&amp;L</div><div class='metric-value {_pnl_class(total_pnl)}'>{_signed_money(total_pnl)}</div><div class='metric-note'>Marked using latest completed candle</div></article><article class='metric'><div class='metric-label'>Active positions</div><div class='metric-value'>{len(active_positions)}</div><div class='metric-note'>{len(pending_orders)} queued order{'s' if len(pending_orders) != 1 else ''}</div></article><article class='metric'><div class='metric-label'>Realized P&amp;L</div><div class='metric-value {_pnl_class(realized_pnl)}'>{_signed_money(realized_pnl)}</div><div class='metric-note'>{sum(1 for trade in trades if trade['side'] == 'SELL')} closed trades</div></article></div>
 <section class='section'><div class='section-head'><div><h2>Open paper positions</h2><p>Forward-paper positions only. Mark P&amp;L includes an estimated fee for closing at the latest completed 4h close. Retiring strategies cannot open again but keep their exit protection until closed.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Status</th><th>Entry</th><th>Last close</th><th>Stop</th><th>Unrealized P&amp;L</th><th>Marked equity</th></tr></thead><tbody>{position_rows}</tbody></table></div></section>
 <section class='section'><div class='section-head'><div><h2>Queued paper orders</h2><p>A completed-candle signal does not fill immediately. It is recorded here and filled at the next completed candle's open, unless it is cancelled by an earlier protective exit.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Order</th><th>Planned fill</th></tr></thead><tbody>{pending_rows}</tbody></table></div></section>
@@ -129,8 +132,16 @@ def _candlestick_chart(symbol: str, candles: list[dict], positions: list[dict]) 
     if len(candles) < 2:
         return "<p class='chart-empty'>Chart data will appear after the next completed paper cycle.</p>"
 
+    chart_frame = pd.DataFrame(candles)
+    # Stored chart candles keep OHLCV only; delta fields are not needed by the
+    # visual indicators, but add_indicators also calculates the dashboard proxy.
+    chart_frame["taker_base"] = 0.0
+    chart_frame["taker_quote"] = 0.0
+    chart_frame["quote_volume"] = chart_frame["close"] * chart_frame["volume"]
+    indicator_frame = add_indicators(chart_frame)
     palette = ["#fbc96a", "#a78bfa", "#22d3ee", "#fb7185"]
     levels: list[dict] = []
+    zones: list[dict] = []
     legend: list[str] = []
     for index, position in enumerate(positions):
         colour = palette[index % len(palette)]
@@ -139,19 +150,37 @@ def _candlestick_chart(symbol: str, candles: list[dict], positions: list[dict]) 
             {"price": position["entry_price"], "colour": colour, "kind": "ENTRY", "name": name},
             {"price": position["stop_price"], "colour": colour, "kind": "STOP", "name": name},
         ])
+        risk = position["entry_price"] - position["stop_price"]
+        # The spot engine has a trailing protective stop but no fixed take-profit
+        # order.  The target is deliberately labelled as a visual 1.75R reference,
+        # rather than suggesting that it is an executable order.
+        zones.append({"entry": position["entry_price"], "stop": position["stop_price"],
+                      "target": position["entry_price"] + 1.75 * risk,
+                      "label": "1.75R reference"})
         legend.append(
             f"<li><i style='background:{colour}'></i><strong>{html.escape(name)}</strong> · entry {_money(position['entry_price'])} · stop {_money(position['stop_price'])} · <span class='{_pnl_class(position['pnl'])}'>{_signed_money(position['pnl'])}</span></li>"
         )
+    levels.extend([
+        {"price": float(indicator_frame["high"].tail(20).max()), "colour": "#fb7185", "kind": "R20", "name": "20-candle resistance"},
+        {"price": float(indicator_frame["low"].tail(20).min()), "colour": "#55d998", "kind": "S20", "name": "20-candle support"},
+    ])
+    indicators = {
+        "EMA 20": {"colour": "#78a9ff", "values": [None if pd.isna(value) else float(value) for value in indicator_frame["ema20"]]},
+        "EMA 50": {"colour": "#a78bfa", "values": [None if pd.isna(value) else float(value) for value in indicator_frame["ema50"]]},
+        "EMA 200": {"colour": "#fbc96a", "values": [None if pd.isna(value) else float(value) for value in indicator_frame["ema200"]]},
+    }
     payload = {
         "symbol": symbol,
         "candles": [{"time": str(candle["candle_time"]), "open": candle["open"], "high": candle["high"],
                      "low": candle["low"], "close": candle["close"], "volume": candle["volume"]}
                     for candle in candles],
         "levels": levels,
+        "zones": zones,
+        "indicators": indicators,
     }
     data = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
     return f"""<div class='interactive-chart' data-symbol='{html.escape(symbol)}'>
-    <div class='chart-controls'><div><strong>{len(candles)} stored {html.escape(symbol)} candles</strong><span>Scroll to zoom · drag to pan · hover for OHLC</span></div><div class='chart-buttons'><button type='button' data-window='30'>30</button><button type='button' data-window='90'>90</button><button type='button' data-window='full'>Full</button></div></div>
+    <div class='chart-controls'><div><strong>{len(candles)} stored {html.escape(symbol)} candles</strong><span>EMA 20 / 50 / 200 · 20-candle support/resistance · green/red 1.75R reference zone · scroll to zoom · drag to pan · hover for OHLC</span></div><div class='chart-buttons'><button type='button' data-window='30'>30</button><button type='button' data-window='90'>90</button><button type='button' data-window='full'>Full</button></div></div>
     <div class='chart-canvas-wrap'><canvas aria-label='{html.escape(symbol)} interactive OHLC candlestick chart'></canvas><div class='chart-tooltip' hidden></div></div>
     <script type='application/json' class='chart-data'>{data}</script></div><ul class='position-legend'>{''.join(legend)}</ul>"""
 
@@ -186,7 +215,11 @@ def _interactive_chart_script() -> str:
       const plotWidth = width - left - right, plotHeight = height - top - bottom;
       const start = clamp(end - visible, 0, Math.max(0, candles.length - visible));
       const view = candles.slice(start, end);
-      const prices = view.flatMap((candle) => [candle.low, candle.high]).concat(payload.levels.map((line) => line.price));
+      const indicatorPrices = Object.values(payload.indicators || {}).flatMap((indicator) =>
+        indicator.values.slice(start, end).filter((value) => value !== null));
+      const zonePrices = (payload.zones || []).flatMap((zone) => [zone.entry, zone.stop, zone.target]);
+      const prices = view.flatMap((candle) => [candle.low, candle.high])
+        .concat(payload.levels.map((line) => line.price), indicatorPrices, zonePrices);
       const minimum = Math.min(...prices), maximum = Math.max(...prices);
       const padding = Math.max((maximum - minimum) * 0.08, maximum * 0.001);
       const low = minimum - padding, high = maximum + padding, range = Math.max(high - low, 0.000001);
@@ -203,6 +236,34 @@ def _interactive_chart_script() -> str:
         ctx.fillText(price.toLocaleString(undefined, {maximumFractionDigits: 2}), width - right + 6, gridY + 4);
       }
       ctx.setLineDash([]);
+      // Draw the risk/reward blocks before the candles so price action and levels
+      // remain readable. These are references for existing Spot positions, not
+      // take-profit orders.
+      (payload.zones || []).forEach((zone) => {
+        const entryY = y(zone.entry), stopY = y(zone.stop), targetY = y(zone.target);
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = '#55d998';
+        ctx.fillRect(left, Math.min(targetY, entryY), plotWidth, Math.abs(entryY - targetY));
+        ctx.fillStyle = '#ff4f67';
+        ctx.fillRect(left, Math.min(entryY, stopY), plotWidth, Math.abs(stopY - entryY));
+        ctx.globalAlpha = 1;
+        ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+        ctx.fillStyle = '#83eabb'; ctx.fillText('POTENTIAL REWARD · ' + zone.label, left + 7, Math.min(targetY, entryY) + 13);
+        ctx.fillStyle = '#ff9dab'; ctx.fillText('RISK · STOP', left + 7, Math.min(entryY, stopY) + 13);
+      });
+      Object.entries(payload.indicators || {}).forEach(([name, indicator]) => {
+        const values = indicator.values.slice(start, end);
+        ctx.strokeStyle = indicator.colour; ctx.lineWidth = 1.4; ctx.globalAlpha = 0.92;
+        ctx.beginPath();
+        let drawing = false;
+        values.forEach((value, index) => {
+          if (value === null) { drawing = false; return; }
+          const x = left + (index + 0.5) * (plotWidth / view.length);
+          if (!drawing) { ctx.moveTo(x, y(value)); drawing = true; }
+          else { ctx.lineTo(x, y(value)); }
+        });
+        ctx.stroke(); ctx.globalAlpha = 1;
+      });
       const step = plotWidth / view.length, body = Math.max(1, step * 0.65);
       view.forEach((candle, index) => {
         const x = left + (index + 0.5) * step;
@@ -220,6 +281,11 @@ def _interactive_chart_script() -> str:
         ctx.beginPath(); ctx.moveTo(left, lineY); ctx.lineTo(width - right, lineY); ctx.stroke();
         ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = line.colour; ctx.textAlign = 'right';
         ctx.fillText(`${line.kind} $${line.price.toLocaleString(undefined, {maximumFractionDigits: 2})}`, width - right - 4, lineY - 5);
+      });
+      ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+      let legendX = left + 6;
+      Object.entries(payload.indicators || {}).forEach(([name, indicator]) => {
+        ctx.fillStyle = indicator.colour; ctx.fillText(name, legendX, top + 13); legendX += ctx.measureText(name).width + 13;
       });
       ctx.fillStyle = '#8fa0bd'; ctx.textAlign = 'left';
       ctx.fillText(view[0].time.slice(0, 16).replace('T', ' '), left, height - 9);

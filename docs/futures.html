@@ -1,0 +1,158 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Futures Paper Lab</title><style>
+:root{--bg:#090d19;--panel:#111827;--line:#29364f;--text:#edf3ff;--muted:#94a3b8;--blue:#78a9ff;--green:#55d998;--red:#ff7b8b}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% -10%,#1b3059 0,transparent 36%),var(--bg);color:var(--text);font:14px system-ui,sans-serif}main{max-width:1240px;margin:auto;padding:34px 24px 48px}a{color:var(--blue);font-weight:700;text-decoration:none}h1{font-size:30px;margin:10px 0 6px}h2{font-size:19px;margin:0}p{color:var(--muted);line-height:1.55}.badge{display:inline-block;background:#3c2616;color:#ffd28a;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;letter-spacing:.06em}.top{display:flex;justify-content:space-between;gap:16px;align-items:start}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin:20px 0}.metric,.section{background:linear-gradient(145deg,#151f33,#111827);border:1px solid var(--line);border-radius:16px}.metric{padding:17px}.metric span{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;font-weight:700}.metric strong{font-size:23px;display:block;margin:8px 0 2px}.section{padding:18px;margin-top:16px;overflow:hidden}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;white-space:nowrap}th,td{padding:11px 9px;text-align:left;border-bottom:1px solid var(--line)}th{font-size:11px;color:var(--blue);letter-spacing:.05em}.long,.green{color:var(--green);font-weight:800}.short,.red{color:var(--red);font-weight:800}.note{border-left:3px solid #fbc96a;background:#292313;color:#e9d6a3;padding:10px 12px;font-size:12px}.chart-controls{display:flex;justify-content:space-between;gap:12px;margin-bottom:9px;color:var(--muted);font-size:12px}.chart-controls strong{display:block;color:var(--text);margin-bottom:3px}.chart-buttons{display:flex;gap:6px}button{border:1px solid #334463;background:#121d30;color:#b9ceef;border-radius:7px;padding:5px 9px;font-weight:700;cursor:pointer}.chart-canvas-wrap{position:relative;background:#0a101c;border:1px solid #202c42;border-radius:10px;overflow:hidden}canvas{display:block;width:100%;touch-action:none;cursor:crosshair}.chart-tooltip{position:absolute;z-index:2;min-width:170px;padding:8px 9px;background:#111c30ef;border:1px solid #425575;border-radius:8px;color:#cbd8ee;font-size:11px;line-height:1.55;pointer-events:none}.empty{padding:24px 0}@media(max-width:760px){main{padding:22px 14px}.top{display:block}.metrics{grid-template-columns:repeat(2,1fr)}.chart-controls{flex-direction:column}}
+</style></head><body><main><header class='top'><div><span class='badge'>PAPER FUTURES · NO ACCOUNT CONNECTION · NO ORDERS</span><h1>Futures Paper Lab</h1><p>One shared simulated wallet, long/short signals, isolated 3.0× notional cap, and public market data only.</p></div><a href='index.html'>← Spot dashboard</a></header><div class='metrics'><div class='metric'><span>Paper wallet cash</span><strong>$10.0000</strong><small>Starting balance $10.0000</small></div><div class='metric'><span>Leverage cap</span><strong>3.0×</strong><small>$5.0000 margin per attempt</small></div><div class='metric'><span>Open P&amp;L</span><strong>$0.0000</strong><small>Marked from public mark price when available</small></div><div class='metric'><span>Queued setup</span><strong>No</strong><small>No queued entry</small></div></div><section class='section'><h2>Open simulated position</h2><div class='table-wrap'><table><thead><tr><th>Market</th><th>Side</th><th>Entry</th><th>Mark</th><th>Stop</th><th>Take profit</th><th>Margin</th><th>Open P&amp;L</th><th>Funding paid</th></tr></thead><tbody><tr><td colspan='9'>No open position</td></tr></tbody></table></div></section><section class='section'><h2>Position risk / reward chart</h2><p>Green is the simulated take-profit area. Red is the simulated stop-loss area. Stop is checked first if a single OHLC candle crosses both levels.</p><p class='empty'>No active simulated futures position. The chart appears when a confirmed signal fills.</p></section><section class='section'><h2>Market and funding context</h2><div class='table-wrap'><table><thead><tr><th>Market</th><th>Last completed close</th><th>Public mark</th><th>Last funding rate</th></tr></thead><tbody><tr><td>BNBUSDT</td><td>$789.99</td><td>$791.41</td><td>0.0012%</td></tr><tr><td>BTCUSDT</td><td>$85,387.40</td><td>$85,707.90</td><td>0.0041%</td></tr><tr><td>ETHUSDT</td><td>$2,700.49</td><td>$2,701.30</td><td>0.0047%</td></tr><tr><td>SOLUSDT</td><td>$121.05</td><td>$120.95</td><td>0.0100%</td></tr><tr><td>XRPUSDT</td><td>$1.5061</td><td>$1.5020</td><td>0.0100%</td></tr></tbody></table></div></section><section class='section'><h2>Simulated trade ledger</h2><div class='table-wrap'><table><thead><tr><th>Recorded UTC</th><th>Market</th><th>Side</th><th>Action</th><th>Price</th><th>Realized P&amp;L</th><th>Reason</th></tr></thead><tbody><tr><td colspan='7'>No completed simulated trades</td></tr></tbody></table></div></section><p class='note'>Entry: EMA 50/200 trend regime + EMA 20 pullback/reclaim + RSI and above-median volume. Initial stop: 2 ATR. Target: 3.5 ATR (1.75R). Trailing stop: 2.5 ATR. This is a paper experiment, not a profitable-system claim or a live-trading recommendation.</p></main><script>
+(() => {
+  const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
+  document.querySelectorAll('.interactive-chart').forEach((root) => {
+    const payload = JSON.parse(root.querySelector('.chart-data').textContent);
+    const candles = payload.candles;
+    const canvas = root.querySelector('canvas');
+    const tooltip = root.querySelector('.chart-tooltip');
+    const ctx = canvas.getContext('2d');
+    let visible = candles.length;
+    let end = candles.length;
+    let drag = null;
+
+    const render = () => {
+      const bounds = canvas.getBoundingClientRect();
+      const width = Math.max(320, Math.floor(bounds.width));
+      const height = 440;
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = width * ratio;
+      canvas.height = height * ratio;
+      canvas.style.height = `${height}px`;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+
+      const left = 12, right = 68, top = 18, bottom = 30;
+      const plotWidth = width - left - right, plotHeight = height - top - bottom;
+      const start = clamp(end - visible, 0, Math.max(0, candles.length - visible));
+      const view = candles.slice(start, end);
+      const indicatorPrices = Object.values(payload.indicators || {}).flatMap((indicator) =>
+        indicator.values.slice(start, end).filter((value) => value !== null));
+      const zonePrices = (payload.zones || []).flatMap((zone) => [zone.entry, zone.stop, zone.target]);
+      const prices = view.flatMap((candle) => [candle.low, candle.high])
+        .concat(payload.levels.map((line) => line.price), indicatorPrices, zonePrices);
+      const minimum = Math.min(...prices), maximum = Math.max(...prices);
+      const padding = Math.max((maximum - minimum) * 0.08, maximum * 0.001);
+      const low = minimum - padding, high = maximum + padding, range = Math.max(high - low, 0.000001);
+      const y = (price) => top + (high - price) * plotHeight / range;
+
+      ctx.fillStyle = '#0a101c';
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = '#243149'; ctx.lineWidth = 1; ctx.setLineDash([3, 5]);
+      ctx.font = '11px system-ui'; ctx.fillStyle = '#8fa0bd'; ctx.textAlign = 'left';
+      for (let grid = 0; grid <= 4; grid += 1) {
+        const gridY = top + plotHeight * grid / 4;
+        const price = high - range * grid / 4;
+        ctx.beginPath(); ctx.moveTo(left, gridY); ctx.lineTo(width - right, gridY); ctx.stroke();
+        ctx.fillText(price.toLocaleString(undefined, {maximumFractionDigits: 2}), width - right + 6, gridY + 4);
+      }
+      ctx.setLineDash([]);
+      // Draw the risk/reward blocks before the candles so price action and levels
+      // remain readable. These are references for existing Spot positions, not
+      // take-profit orders.
+      (payload.zones || []).forEach((zone) => {
+        const entryY = y(zone.entry), stopY = y(zone.stop), targetY = y(zone.target);
+        ctx.globalAlpha = 0.18;
+        ctx.fillStyle = '#55d998';
+        ctx.fillRect(left, Math.min(targetY, entryY), plotWidth, Math.abs(entryY - targetY));
+        ctx.fillStyle = '#ff4f67';
+        ctx.fillRect(left, Math.min(entryY, stopY), plotWidth, Math.abs(stopY - entryY));
+        ctx.globalAlpha = 1;
+        ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+        ctx.fillStyle = '#83eabb'; ctx.fillText('POTENTIAL REWARD · ' + zone.label, left + 7, Math.min(targetY, entryY) + 13);
+        ctx.fillStyle = '#ff9dab'; ctx.fillText('RISK · STOP', left + 7, Math.min(entryY, stopY) + 13);
+      });
+      Object.entries(payload.indicators || {}).forEach(([name, indicator]) => {
+        const values = indicator.values.slice(start, end);
+        ctx.strokeStyle = indicator.colour; ctx.lineWidth = 1.4; ctx.globalAlpha = 0.92;
+        ctx.beginPath();
+        let drawing = false;
+        values.forEach((value, index) => {
+          if (value === null) { drawing = false; return; }
+          const x = left + (index + 0.5) * (plotWidth / view.length);
+          if (!drawing) { ctx.moveTo(x, y(value)); drawing = true; }
+          else { ctx.lineTo(x, y(value)); }
+        });
+        ctx.stroke(); ctx.globalAlpha = 1;
+      });
+      const step = plotWidth / view.length, body = Math.max(1, step * 0.65);
+      view.forEach((candle, index) => {
+        const x = left + (index + 0.5) * step;
+        const colour = candle.close >= candle.open ? '#55d998' : '#ff7b8b';
+        const openY = y(candle.open), closeY = y(candle.close);
+        ctx.strokeStyle = colour; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, y(candle.high)); ctx.lineTo(x, y(candle.low)); ctx.stroke();
+        ctx.fillStyle = colour;
+        ctx.fillRect(x - body / 2, Math.min(openY, closeY), body, Math.max(1, Math.abs(closeY - openY)));
+      });
+      payload.levels.forEach((line) => {
+        const lineY = y(line.price);
+        ctx.strokeStyle = line.colour; ctx.globalAlpha = line.kind === 'ENTRY' ? 1 : 0.75;
+        ctx.setLineDash(line.kind === 'ENTRY' ? [7, 5] : [2, 5]);
+        ctx.beginPath(); ctx.moveTo(left, lineY); ctx.lineTo(width - right, lineY); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.fillStyle = line.colour; ctx.textAlign = 'right';
+        ctx.fillText(`${line.kind} $${line.price.toLocaleString(undefined, {maximumFractionDigits: 2})}`, width - right - 4, lineY - 5);
+      });
+      ctx.font = '10px system-ui'; ctx.textAlign = 'left';
+      let legendX = left + 6;
+      Object.entries(payload.indicators || {}).forEach(([name, indicator]) => {
+        ctx.fillStyle = indicator.colour; ctx.fillText(name, legendX, top + 13); legendX += ctx.measureText(name).width + 13;
+      });
+      ctx.fillStyle = '#8fa0bd'; ctx.textAlign = 'left';
+      ctx.fillText(view[0].time.slice(0, 16).replace('T', ' '), left, height - 9);
+      ctx.textAlign = 'right';
+      ctx.fillText(view[view.length - 1].time.slice(0, 16).replace('T', ' '), width - right, height - 9);
+      root.querySelector('.chart-controls strong').textContent = `Showing ${view.length} of ${candles.length} stored ${payload.symbol} candles`;
+    };
+
+    const point = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return {x: event.clientX - rect.left, y: event.clientY - rect.top, rect};
+    };
+    canvas.addEventListener('wheel', (event) => {
+      event.preventDefault();
+      const old = visible;
+      const next = clamp(Math.round(old * (event.deltaY < 0 ? 0.78 : 1.28)), Math.min(20, candles.length), candles.length);
+      const {x, rect} = point(event);
+      const focus = clamp((x - 12) / Math.max(1, rect.width - 80), 0, 1);
+      const start = end - old;
+      visible = next;
+      end = clamp(Math.round(start + focus * old + (1 - focus) * next), next, candles.length);
+      render();
+    }, {passive: false});
+    canvas.addEventListener('pointerdown', (event) => {
+      canvas.setPointerCapture(event.pointerId);
+      drag = {x: event.clientX, end};
+      tooltip.hidden = true;
+    });
+    canvas.addEventListener('pointermove', (event) => {
+      const {x, y: mouseY, rect} = point(event);
+      if (drag) {
+        const step = Math.max(1, (rect.width - 80) / visible);
+        end = clamp(Math.round(drag.end - (event.clientX - drag.x) / step), visible, candles.length);
+        render();
+        return;
+      }
+      const start = end - visible;
+      const index = clamp(start + Math.floor((x - 12) / Math.max(1, (rect.width - 80) / visible)), start, end - 1);
+      const candle = candles[index];
+      if (!candle || mouseY < 0 || mouseY > 410) { tooltip.hidden = true; return; }
+      tooltip.innerHTML = `<strong>${candle.time.slice(0, 16).replace('T', ' ')} UTC</strong><br>O $${candle.open.toLocaleString()} · H $${candle.high.toLocaleString()}<br>L $${candle.low.toLocaleString()} · C $${candle.close.toLocaleString()}`;
+      tooltip.style.left = `${clamp(x + 14, 8, rect.width - 190)}px`;
+      tooltip.style.top = `${clamp(mouseY + 14, 8, 340)}px`;
+      tooltip.hidden = false;
+    });
+    canvas.addEventListener('pointerup', () => { drag = null; });
+    canvas.addEventListener('pointerleave', () => { if (!drag) tooltip.hidden = true; });
+    root.querySelectorAll('[data-window]').forEach((button) => button.addEventListener('click', () => {
+      visible = button.dataset.window === 'full' ? candles.length : Math.min(candles.length, Number(button.dataset.window));
+      end = candles.length;
+      render();
+    }));
+    new ResizeObserver(render).observe(root);
+    render();
+  });
+})();
+</script></body></html>

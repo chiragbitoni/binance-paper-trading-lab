@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from trading_bot.config import load_config
-from trading_bot.market import BinanceLiveClient
+from trading_bot.market import BinanceFuturesMarketData, BinanceLiveClient
 from trading_bot.paper import paper_cycle
 from trading_bot.risk import advance_trailing_stop, stop_fill_price
 from trading_bot.storage import Storage
@@ -35,6 +35,9 @@ class RiskModelTests(unittest.TestCase):
 class ConfigSafetyTests(unittest.TestCase):
     def test_account_client_has_no_order_method(self) -> None:
         self.assertFalse(hasattr(BinanceLiveClient, "market_order"))
+
+    def test_futures_market_client_has_no_order_method(self) -> None:
+        self.assertFalse(hasattr(BinanceFuturesMarketData, "market_order"))
 
     def test_live_mode_is_rejected(self) -> None:
         source = Path("config.json")
@@ -64,6 +67,16 @@ class ConfigSafetyTests(unittest.TestCase):
             path = Path(directory) / "config.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "slippage_rate"):
+                load_config(path)
+
+    def test_futures_leverage_is_capped_for_the_paper_lab(self) -> None:
+        source = Path("config.json")
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        payload["futures_paper"]["leverage"] = 4
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "leverage"):
                 load_config(path)
 
 

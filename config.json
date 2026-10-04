@@ -24,5 +24,17 @@
   ],
   "database": "data/trading_bot.db",
   "dashboard_host": "127.0.0.1",
-  "dashboard_port": 8765
+  "dashboard_port": 8765,
+  "futures_paper": {
+    "enabled": true,
+    "symbols": ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"],
+    "interval": "4h",
+    "starting_balance": 10.0,
+    "margin_per_trade": 5.0,
+    "leverage": 3.0,
+    "fee_rate": 0.0005,
+    "slippage_rate": 0.0005,
+    "minimum_notional": 5.0,
+    "max_entry_funding_rate": 0.0005
+  }
 }
