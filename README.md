@@ -17,7 +17,8 @@ A transparent, paper-first Binance Spot strategy research bot for five liquid US
 - Two-year historical backtests with fees, slippage, and next-candle execution
 - Return, win rate, profit factor, trade count, and maximum drawdown tracking
 - Forward-paper positions and trades stored independently from backtests
-- Decision dashboard with portfolio equity, open-position charts, mark P&L, stops, candle delta, trade ledger, and research results
+- Decision dashboard with portfolio equity, mark P&L, stops, candle delta, trade ledger, and research results
+- Dedicated candlestick chart page that groups all open strategy positions for each ticker
 - Binance market-data-only API; no credentials required for paper mode
 - Automated four-hour updates through GitHub Actions
 - Lightweight dashboard published through GitHub Pages
