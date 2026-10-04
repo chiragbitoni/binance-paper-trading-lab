@@ -16,7 +16,9 @@ concurrency:
 
 jobs:
   update-paper-state:
-    runs-on: ubuntu-latest
+    # Pin the runner image so an ubuntu-latest rollover cannot silently change
+    # the paper-trading environment.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
