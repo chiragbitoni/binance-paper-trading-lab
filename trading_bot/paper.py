@@ -25,6 +25,11 @@ def paper_cycle(cfg: Config, storage: Storage, market: BinanceMarketData) -> lis
         i = len(df) - 1
         row = df.iloc[i]
         candle_time = str(row.open_time)
+        storage.save_market_snapshot({
+            "symbol": symbol, "candle_time": candle_time, "close": row.close,
+            "delta_base": row.delta_base, "delta_quote": row.delta_quote,
+            "delta_ratio": row.delta_ratio, "cvd_quote_24h": row.cvd_quote_24h,
+        })
 
         for account in (a for a in storage.paper_accounts() if a["symbol"] == symbol):
             key = account["strategy_key"]

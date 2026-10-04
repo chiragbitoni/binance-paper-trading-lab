@@ -64,6 +64,16 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   reason TEXT NOT NULL,
   candle_time TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS market_snapshots (
+  symbol TEXT PRIMARY KEY,
+  candle_time TEXT NOT NULL,
+  close REAL NOT NULL,
+  delta_base REAL NOT NULL,
+  delta_quote REAL NOT NULL,
+  delta_ratio REAL,
+  cvd_quote_24h REAL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -166,4 +176,23 @@ class Storage:
     def recent_paper_trades(self, limit: int = 50) -> list[dict]:
         return [dict(row) for row in self.connection.execute(
             "SELECT * FROM paper_trades ORDER BY id DESC LIMIT ?", (limit,)
+        )]
+
+    def save_market_snapshot(self, snapshot: dict) -> None:
+        self.connection.execute(
+            """INSERT INTO market_snapshots
+            (symbol,candle_time,close,delta_base,delta_quote,delta_ratio,cvd_quote_24h)
+            VALUES (?,?,?,?,?,?,?)
+            ON CONFLICT(symbol) DO UPDATE SET candle_time=excluded.candle_time,close=excluded.close,
+              delta_base=excluded.delta_base,delta_quote=excluded.delta_quote,
+              delta_ratio=excluded.delta_ratio,cvd_quote_24h=excluded.cvd_quote_24h,
+              updated_at=CURRENT_TIMESTAMP""",
+            (snapshot["symbol"], snapshot["candle_time"], snapshot["close"], snapshot["delta_base"],
+             snapshot["delta_quote"], snapshot["delta_ratio"], snapshot["cvd_quote_24h"]),
+        )
+        self.connection.commit()
+
+    def market_snapshots(self) -> list[dict]:
+        return [dict(row) for row in self.connection.execute(
+            "SELECT * FROM market_snapshots ORDER BY symbol"
         )]

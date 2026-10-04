@@ -99,7 +99,7 @@ def bollinger_rsi_exit(df: pd.DataFrame, i: int) -> bool:
     return row.close >= row.bb_mid or row.rsi >= 60
 
 
-def liquidity_sweep_entry(df: pd.DataFrame, i: int) -> bool:
+def _liquidity_sweep_reclaim(df: pd.DataFrame, i: int) -> bool:
     """Buy a confirmed reclaim after a 20-candle sell-side liquidity sweep.
 
     The sweep is the previous completed candle: it must pierce the prior
@@ -125,6 +125,10 @@ def liquidity_sweep_entry(df: pd.DataFrame, i: int) -> bool:
     )
 
 
+def liquidity_sweep_entry(df: pd.DataFrame, i: int) -> bool:
+    return _liquidity_sweep_reclaim(df, i)
+
+
 def liquidity_sweep_exit(df: pd.DataFrame, i: int) -> bool:
     """Exit when the post-sweep recovery fails its medium-term trend filter."""
     return _valid(df, i, ["ema50"]) and df.iloc[i].close < df.iloc[i].ema50
@@ -136,6 +140,20 @@ def liquidity_sweep_initial_stop(df: pd.DataFrame, i: int, fill: float) -> float
     wick_stop = sweep.low - 0.25 * sweep.atr
     # A gap at execution must never create a stop above the actual fill.
     return min(wick_stop, fill - 0.5 * sweep.atr)
+
+
+def delta_liquidity_sweep_entry(df: pd.DataFrame, i: int) -> bool:
+    """Require strong positive taker-volume delta on the reclaim confirmation.
+
+    This uses Binance's candle-level taker-buy fields, so it is a single-venue
+    proxy—not a tick-level, multi-exchange CVD signal.
+    """
+    if not _liquidity_sweep_reclaim(df, i):
+        return False
+    row = df.iloc[i]
+    if pd.isna(row.delta_ratio) or pd.isna(row.delta_quote_abs_median_20):
+        return False
+    return row.delta_ratio >= 0.10 and row.delta_quote >= row.delta_quote_abs_median_20
 
 
 def buy_hold_entry(df: pd.DataFrame, i: int) -> bool:
@@ -169,6 +187,10 @@ STRATEGIES: dict[str, Strategy] = {
                                  "Buys a 20-candle low sweep only after a 4h reclaim and confirmation above the sweep high.",
                                  liquidity_sweep_entry, liquidity_sweep_exit, 2.0, None,
                                  liquidity_sweep_initial_stop),
+    "delta_liquidity_sweep": Strategy("delta_liquidity_sweep", "Delta-confirmed sweep (research-only)",
+                                       "Adds positive taker-volume delta and above-median flow to the liquidity-sweep reclaim.",
+                                       delta_liquidity_sweep_entry, liquidity_sweep_exit, 2.0, None,
+                                       liquidity_sweep_initial_stop),
     "buy_hold_benchmark": Strategy("buy_hold_benchmark", "Buy-and-hold benchmark",
                                    "Buys once at the common warm-up point and holds to the test end.",
                                    buy_hold_entry, never_exit, 1000.0, None),

@@ -14,6 +14,13 @@ def _page(cfg: Config, storage: Storage) -> str:
     backtests = storage.latest_backtests()
     accounts = storage.paper_accounts()
     trades = storage.recent_paper_trades()
+    snapshots = storage.market_snapshots()
+    snapshot_rows = "".join(
+        f"<tr><td>{html.escape(s['symbol'])}</td><td>${s['close']:.4f}</td>"
+        f"<td>{s['delta_ratio'] * 100:+.1f}%</td><td>${s['delta_quote']:,.0f}</td>"
+        f"<td>${s['cvd_quote_24h']:,.0f}</td><td>{s['candle_time']}</td></tr>"
+        for s in snapshots
+    ) or "<tr><td colspan='6'>Process a completed candle to populate delta data.</td></tr>"
     backtest_rows = "".join(
         f"<tr><td>{html.escape(r['symbol'])}</td>"
         f"<td>{html.escape(STRATEGIES.get(r['strategy_key'], STRATEGIES['trend_breakout']).name)}</td>"
@@ -42,6 +49,7 @@ table{{width:100%;border-collapse:collapse}}th,td{{text-align:left;padding:10px;
 .badge{{display:inline-block;background:#173d2d;color:#7aefad;border-radius:999px;padding:5px 10px}}code{{color:#ffd479}}</style></head>
 <body><main><span class='badge'>PAPER MODE</span><h1>Binance Strategy Lab</h1>
 <p>{', '.join(cfg.symbols)} · {cfg.interval} candles · ${cfg.starting_balance:.2f} independent balance per market/strategy · live orders locked</p>
+<section><h2>Latest candle delta</h2><p>Candle-level Binance Spot taker-volume proxy; positive means more taker-buy volume. 24h CVD is the rolling sum of six 4h candle deltas, not a multi-exchange or tick-level metric.</p><table><thead><tr><th>Market</th><th>Close</th><th>Delta ratio</th><th>Candle delta (USDT)</th><th>24h CVD (USDT)</th><th>Candle open</th></tr></thead><tbody>{snapshot_rows}</tbody></table></section>
 <section><h2>Latest historical backtests</h2><table><thead><tr><th>Market</th><th>Strategy</th><th>Return</th><th>Trades</th><th>W/L</th><th>Win rate</th><th>Profit factor</th><th>Max drawdown</th></tr></thead><tbody>{backtest_rows}</tbody></table></section>
 <section><h2>Forward paper accounts</h2><table><thead><tr><th>Market</th><th>Strategy</th><th>Cash</th><th>Quantity</th><th>Entry</th><th>Updated</th></tr></thead><tbody>{account_rows}</tbody></table></section>
 <section><h2>Recent paper trades</h2><table><thead><tr><th>Time</th><th>Market</th><th>Strategy</th><th>Side</th><th>Price</th><th>Quantity</th><th>PnL</th><th>Reason</th></tr></thead><tbody>{trade_rows}</tbody></table></section>

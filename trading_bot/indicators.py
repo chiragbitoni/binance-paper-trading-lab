@@ -38,5 +38,16 @@ def add_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     # These reference only candles that completed before the current one.  That
     # prevents the liquidity-sweep rule from comparing a candle to its own low.
     df["prior_low_20"] = df["low"].shift(1).rolling(20).min()
+    # Binance klines include taker-buy volume.  The remainder of total volume
+    # is taker-sell volume, letting us calculate an exchange-specific, candle
+    # level delta proxy without inventing a trade side from OHLC prices.
+    df["taker_sell_base"] = df["volume"] - df["taker_base"]
+    df["delta_base"] = df["taker_base"] - df["taker_sell_base"]
+    df["delta_quote"] = 2 * df["taker_quote"] - df["quote_volume"]
+    df["delta_ratio"] = df["delta_base"] / df["volume"].replace(0, float("nan"))
+    df["delta_quote_abs_median_20"] = df["delta_quote"].abs().shift(1).rolling(20).median()
+    # Six four-hour candles make a rolling 24-hour CVD, shown for context on
+    # the dashboard.  It is not a full tick-by-tick or multi-exchange CVD.
+    df["cvd_quote_24h"] = df["delta_quote"].rolling(6).sum()
     df["atr_ratio_q30"] = df["atr_ratio"].shift(1).rolling(100).quantile(0.30)
     return df

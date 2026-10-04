@@ -33,6 +33,7 @@ A transparent, paper-first Binance Spot strategy research bot for five liquid US
 | Quiet-to-active breakout | Volatility expansion after compression |
 | Bollinger/RSI recovery | Mean recovery with a trend filter |
 | Confirmed liquidity-sweep reclaim | Research-only: reversal after reclaiming a swept 20-candle low |
+| Delta-confirmed sweep | Research-only: liquidity-sweep reclaim with strong positive taker-volume delta |
 | Buy-and-hold benchmark | Baseline using the same position cap |
 
 The dashboard contains the latest saved results. Compare net return, drawdown, profit factor, and sample size together—win rate alone is not enough. Research-only strategies appear in historical results but cannot open a forward-paper account until explicitly promoted after review.
@@ -40,6 +41,10 @@ The dashboard contains the latest saved results. Compare net return, drawdown, p
 ### Liquidity-sweep rule
 
 The long-only liquidity-sweep strategy uses a fully mechanical four-hour rule: the prior candle must wick below the previous 20-candle low, close back above that level, and have a lower wick of at least `0.5 ATR`. A following candle must close above that sweep candle's high while price is above the 200 EMA. The initial stop is below the sweep wick with a `0.25 ATR` buffer; a close below the 50 EMA exits the position. This describes price behaviour only—it does not prove why orders were triggered or promise a reversal.
+
+### Candle delta and delta-confirmed sweep
+
+Binance Spot klines expose total volume and taker-buy volume. The dashboard calculates candle delta as `taker-buy − (total − taker-buy)` and displays its percentage of total volume plus a rolling 24-hour CVD. These are Binance-only, candle-level measures—not tick-level or multi-exchange order flow. The delta-confirmed sweep adds two entry conditions to the liquidity-sweep reclaim: at least `+10%` candle delta and positive delta notional at least as large as the preceding 20-candle median. It remains research-only until its own results justify forward-paper testing.
 
 ## Quick start
 
