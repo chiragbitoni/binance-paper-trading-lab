@@ -165,7 +165,7 @@ STRATEGIES: dict[str, Strategy] = {
     "bollinger_rsi": Strategy("bollinger_rsi", "Trend-filtered Bollinger recovery",
                               "Buys an oversold Bollinger move only above the 200 EMA.",
                               bollinger_rsi_entry, bollinger_rsi_exit, 2.0, None),
-    "liquidity_sweep": Strategy("liquidity_sweep", "Confirmed liquidity-sweep reclaim",
+    "liquidity_sweep": Strategy("liquidity_sweep", "Liquidity-sweep reclaim (research-only)",
                                  "Buys a 20-candle low sweep only after a 4h reclaim and confirmation above the sweep high.",
                                  liquidity_sweep_entry, liquidity_sweep_exit, 2.0, None,
                                  liquidity_sweep_initial_stop),
