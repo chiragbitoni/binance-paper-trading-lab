@@ -10,49 +10,99 @@ from .storage import Storage
 from .strategies import STRATEGIES
 
 
+def _money(value: float) -> str:
+    return f"${value:,.2f}"
+
+
+def _signed_money(value: float) -> str:
+    return f"{value:+,.2f}"
+
+
+def _pnl_class(value: float) -> str:
+    return "positive" if value > 0 else "negative" if value < 0 else "neutral"
+
+
 def _page(cfg: Config, storage: Storage) -> str:
     backtests = storage.latest_backtests()
     accounts = storage.paper_accounts()
     trades = storage.recent_paper_trades()
     snapshots = storage.market_snapshots()
+    snapshots_by_symbol = {snapshot["symbol"]: snapshot for snapshot in snapshots}
+
+    active_positions: list[dict] = []
+    marked_equity = 0.0
+    for account in accounts:
+        snapshot = snapshots_by_symbol.get(account["symbol"])
+        close = snapshot["close"] if snapshot else None
+        if account["quantity"] > 0 and close is not None:
+            position_value = account["quantity"] * close * (1 - cfg.fee_rate)
+            account_equity = account["cash"] + position_value
+            pnl = account_equity - cfg.starting_balance
+            active_positions.append({**account, "close": close, "equity": account_equity, "pnl": pnl})
+            marked_equity += account_equity
+        else:
+            marked_equity += account["cash"]
+
+    starting_equity = len(accounts) * cfg.starting_balance
+    total_pnl = marked_equity - starting_equity
+    realized_pnl = sum(trade["realized_pnl"] or 0.0 for trade in trades if trade["side"] == "SELL")
+    snapshot_updated = max((snapshot["updated_at"] for snapshot in snapshots), default="Waiting for first completed candle")
+
     snapshot_rows = "".join(
-        f"<tr><td>{html.escape(s['symbol'])}</td><td>${s['close']:.4f}</td>"
-        f"<td>{s['delta_ratio'] * 100:+.1f}%</td><td>${s['delta_quote']:,.0f}</td>"
-        f"<td>${s['cvd_quote_24h']:,.0f}</td><td>{s['candle_time']}</td></tr>"
-        for s in snapshots
-    ) or "<tr><td colspan='6'>Process a completed candle to populate delta data.</td></tr>"
+        f"<tr><td><strong>{html.escape(snapshot['symbol'])}</strong></td><td>{_money(snapshot['close'])}</td>"
+        f"<td class='{_pnl_class(snapshot['delta_ratio'] or 0)}'>{(snapshot['delta_ratio'] or 0) * 100:+.1f}%</td>"
+        f"<td class='{_pnl_class(snapshot['delta_quote'])}'>{_signed_money(snapshot['delta_quote'])}</td>"
+        f"<td class='{_pnl_class(snapshot['cvd_quote_24h'] or 0)}'>{_signed_money(snapshot['cvd_quote_24h'] or 0)}</td>"
+        f"<td>{html.escape(snapshot['candle_time'])}</td></tr>"
+        for snapshot in snapshots
+    ) or "<tr><td colspan='6'>Waiting for a completed candle.</td></tr>"
+
+    position_rows = "".join(
+        f"<tr><td><strong>{html.escape(position['symbol'])}</strong></td>"
+        f"<td>{html.escape(STRATEGIES[position['strategy_key']].name)}</td>"
+        f"<td>{_money(position['entry_price'])}</td><td>{_money(position['close'])}</td>"
+        f"<td>{_money(position['stop_price'])}</td>"
+        f"<td class='{_pnl_class(position['pnl'])}'>{_signed_money(position['pnl'])} ({position['pnl'] / cfg.starting_balance * 100:+.2f}%)</td>"
+        f"<td>{_money(position['equity'])}</td></tr>"
+        for position in active_positions
+    ) or "<tr><td colspan='7'>No active paper positions.</td></tr>"
+
     backtest_rows = "".join(
-        f"<tr><td>{html.escape(r['symbol'])}</td>"
-        f"<td>{html.escape(STRATEGIES.get(r['strategy_key'], STRATEGIES['trend_breakout']).name)}</td>"
-        f"<td>{r['total_return_pct']:.2f}%</td><td>{r['trades']}</td><td>{r['wins']}/{r['losses']}</td>"
-        f"<td>{r['win_rate']:.1f}%</td><td>{r['profit_factor'] if r['profit_factor'] is not None else '—'}</td>"
-        f"<td>{r['max_drawdown_pct']:.2f}%</td></tr>" for r in backtests
+        f"<tr><td>{html.escape(result['symbol'])}</td>"
+        f"<td>{html.escape(STRATEGIES.get(result['strategy_key'], STRATEGIES['trend_breakout']).name)}</td>"
+        f"<td class='{_pnl_class(result['total_return_pct'])}'>{result['total_return_pct']:+.2f}%</td>"
+        f"<td>{result['trades']}</td><td>{result['wins']}/{result['losses']}</td>"
+        f"<td>{result['win_rate']:.1f}%</td><td>{result['profit_factor'] if result['profit_factor'] is not None else '—'}</td>"
+        f"<td>{result['max_drawdown_pct']:.2f}%</td></tr>"
+        for result in backtests
     ) or "<tr><td colspan='8'>Run a backtest to populate results.</td></tr>"
-    account_rows = "".join(
-        f"<tr><td>{html.escape(a['symbol'])}</td><td>{html.escape(a['strategy_key'])}</td>"
-        f"<td>${a['cash']:.4f}</td><td>{a['quantity']:.8f}</td>"
-        f"<td>{('$' + format(a['entry_price'], '.2f')) if a['entry_price'] else '—'}</td><td>{a['updated_at']}</td></tr>"
-        for a in accounts
-    ) or "<tr><td colspan='6'>Run paper-once to initialize accounts.</td></tr>"
+
     trade_rows = "".join(
-        f"<tr><td>{t['created_at']}</td><td>{html.escape(t['symbol'])}</td>"
-        f"<td>{html.escape(t['strategy_key'])}</td><td>{t['side']}</td>"
-        f"<td>${t['price']:.2f}</td><td>{t['quantity']:.8f}</td>"
-        f"<td>{format(t['realized_pnl'], '.4f') if t['realized_pnl'] is not None else '—'}</td>"
-        f"<td>{html.escape(t['reason'])}</td></tr>" for t in trades
+        f"<tr><td>{trade['created_at']}</td><td><strong>{html.escape(trade['symbol'])}</strong></td>"
+        f"<td>{html.escape(STRATEGIES.get(trade['strategy_key'], STRATEGIES['trend_breakout']).name)}</td>"
+        f"<td><span class='tag {trade['side'].lower()}'>{trade['side']}</span></td>"
+        f"<td>{_money(trade['price'])}</td><td>{trade['quantity']:.8f}</td>"
+        f"<td class='{_pnl_class(trade['realized_pnl'] or 0)}'>{_signed_money(trade['realized_pnl']) if trade['realized_pnl'] is not None else '—'}</td>"
+        f"<td>{html.escape(trade['reason'])}</td></tr>"
+        for trade in trades
     ) or "<tr><td colspan='8'>No paper trades yet.</td></tr>"
-    return f"""<!doctype html><html><head><meta charset='utf-8'><meta http-equiv='refresh' content='60'>
-<title>Paper Trading Lab</title><style>
-body{{font:15px system-ui;margin:0;background:#0b1020;color:#e8edf7}}main{{max-width:1100px;margin:auto;padding:28px}}
-h1{{margin:0 0 8px}}p{{color:#aeb9cf}}section{{background:#141b2d;border:1px solid #26304a;border-radius:14px;padding:18px;margin:18px 0}}
-table{{width:100%;border-collapse:collapse}}th,td{{text-align:left;padding:10px;border-bottom:1px solid #26304a}}th{{color:#8fb6ff}}
-.badge{{display:inline-block;background:#173d2d;color:#7aefad;border-radius:999px;padding:5px 10px}}code{{color:#ffd479}}</style></head>
-<body><main><span class='badge'>PAPER MODE</span><h1>Binance Strategy Lab</h1>
-<p>{', '.join(cfg.symbols)} · {cfg.interval} candles · ${cfg.starting_balance:.2f} independent balance per market/strategy · live orders locked</p>
-<section><h2>Latest candle delta</h2><p>Candle-level Binance Spot taker-volume proxy; positive means more taker-buy volume. 24h CVD is the rolling sum of six 4h candle deltas, not a multi-exchange or tick-level metric.</p><table><thead><tr><th>Market</th><th>Close</th><th>Delta ratio</th><th>Candle delta (USDT)</th><th>24h CVD (USDT)</th><th>Candle open</th></tr></thead><tbody>{snapshot_rows}</tbody></table></section>
-<section><h2>Latest historical backtests</h2><table><thead><tr><th>Market</th><th>Strategy</th><th>Return</th><th>Trades</th><th>W/L</th><th>Win rate</th><th>Profit factor</th><th>Max drawdown</th></tr></thead><tbody>{backtest_rows}</tbody></table></section>
-<section><h2>Forward paper accounts</h2><table><thead><tr><th>Market</th><th>Strategy</th><th>Cash</th><th>Quantity</th><th>Entry</th><th>Updated</th></tr></thead><tbody>{account_rows}</tbody></table></section>
-<section><h2>Recent paper trades</h2><table><thead><tr><th>Time</th><th>Market</th><th>Strategy</th><th>Side</th><th>Price</th><th>Quantity</th><th>PnL</th><th>Reason</th></tr></thead><tbody>{trade_rows}</tbody></table></section>
+
+    return f"""<!doctype html><html lang='en'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'><meta http-equiv='refresh' content='60'>
+<title>Binance Paper Trading Lab</title><style>
+:root{{color-scheme:dark;--bg:#090d19;--panel:#111827;--panel2:#151f33;--line:#27344e;--text:#edf3ff;--muted:#94a3b8;--blue:#78a9ff;--green:#55d998;--red:#ff7b8b;--yellow:#fbc96a}}
+*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 20% -10%,#1b3059 0,transparent 36%),var(--bg);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}}
+main{{max-width:1380px;margin:auto;padding:34px 24px 48px}}.top{{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:25px}}h1{{font-size:30px;letter-spacing:-.7px;margin:8px 0}}h2{{font-size:17px;margin:0 0 6px}}p{{color:var(--muted);line-height:1.55;margin:0}}.badge,.tag{{display:inline-block;border-radius:999px;font-size:11px;font-weight:750;letter-spacing:.06em;padding:5px 9px}}.badge{{background:#123c2a;color:#75e6ae}}.tag.buy{{background:#123c2a;color:#75e6ae}}.tag.sell{{background:#4a1f2b;color:#ff9aa8}}.updated{{font-size:12px;color:var(--muted);text-align:right}}.updated strong{{color:var(--text);display:block;font-size:13px;margin-top:4px}}
+.metrics{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}}.metric,.section{{background:linear-gradient(145deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:16px}}.metric{{padding:18px}}.metric-label{{font-size:12px;color:var(--muted);font-weight:650;text-transform:uppercase;letter-spacing:.06em}}.metric-value{{font-size:25px;font-weight:750;letter-spacing:-.5px;margin:8px 0 4px}}.metric-note{{font-size:12px;color:var(--muted)}}.positive{{color:var(--green)}}.negative{{color:var(--red)}}.neutral{{color:var(--muted)}}
+.section{{padding:18px;margin-top:16px;overflow:hidden}}.section-head{{display:flex;justify-content:space-between;gap:18px;align-items:baseline;margin-bottom:14px}}.section-head p{{font-size:12px;max-width:730px}}.table-wrap{{overflow-x:auto}}table{{width:100%;border-collapse:collapse;white-space:nowrap}}th,td{{padding:11px 10px;text-align:left;border-bottom:1px solid var(--line)}}th{{font-size:11px;color:var(--blue);text-transform:uppercase;letter-spacing:.06em}}td{{font-variant-numeric:tabular-nums}}tr:last-child td{{border-bottom:0}}.footnote{{margin-top:17px;border-left:3px solid var(--yellow);padding:10px 12px;background:#292313;color:#e9d6a3;font-size:12px;line-height:1.5}}
+@media(max-width:900px){{.metrics{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}@media(max-width:620px){{main{{padding:22px 14px}}.top{{display:block}}.updated{{text-align:left;margin-top:16px}}.metrics{{grid-template-columns:1fr 1fr;gap:9px}}.metric{{padding:14px}}.metric-value{{font-size:20px}}.section{{padding:14px}}h1{{font-size:25px}}}}
+</style></head><body><main>
+<header class='top'><div><span class='badge'>PAPER MODE · LIVE ORDERS LOCKED</span><h1>Binance Strategy Lab</h1><p>{', '.join(cfg.symbols)} · completed {cfg.interval} candles · isolated $10 strategy accounts</p></div><div class='updated'>Last processed candle<strong>{html.escape(str(snapshot_updated))}</strong></div></header>
+<div class='metrics'><article class='metric'><div class='metric-label'>Paper equity</div><div class='metric-value'>{_money(marked_equity)}</div><div class='metric-note'>Across {len(accounts)} isolated accounts</div></article><article class='metric'><div class='metric-label'>Forward P&amp;L</div><div class='metric-value {_pnl_class(total_pnl)}'>{_signed_money(total_pnl)}</div><div class='metric-note'>Marked using latest completed candle</div></article><article class='metric'><div class='metric-label'>Active positions</div><div class='metric-value'>{len(active_positions)}</div><div class='metric-note'>of {len(accounts)} paper accounts</div></article><article class='metric'><div class='metric-label'>Realized P&amp;L</div><div class='metric-value {_pnl_class(realized_pnl)}'>{_signed_money(realized_pnl)}</div><div class='metric-note'>{sum(1 for trade in trades if trade['side'] == 'SELL')} closed trades</div></article></div>
+<section class='section'><div class='section-head'><div><h2>Open paper positions</h2><p>Forward-paper positions only. Mark P&amp;L includes an estimated fee for closing at the latest completed 4h close.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Entry</th><th>Last close</th><th>Stop</th><th>Unrealized P&amp;L</th><th>Marked equity</th></tr></thead><tbody>{position_rows}</tbody></table></div></section>
+<section class='section'><div class='section-head'><div><h2>Latest candle delta</h2><p>Binance Spot taker-volume proxy. Positive means relatively more taker-buy volume; 24h CVD sums six 4h candle deltas.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Close</th><th>Delta ratio</th><th>Candle delta (USDT)</th><th>24h CVD (USDT)</th><th>Candle open</th></tr></thead><tbody>{snapshot_rows}</tbody></table></div></section>
+<section class='section'><div class='section-head'><div><h2>Forward trade ledger</h2><p>Actual simulated entries and exits—not historical backtest trades.</p></div></div><div class='table-wrap'><table><thead><tr><th>Recorded</th><th>Market</th><th>Strategy</th><th>Side</th><th>Price</th><th>Quantity</th><th>Realized P&amp;L</th><th>Reason</th></tr></thead><tbody>{trade_rows}</tbody></table></div></section>
+<section class='section'><div class='section-head'><div><h2>Strategy laboratory</h2><p>Historical two-year backtests. Research-only strategies are displayed here but cannot open paper positions.</p></div></div><div class='table-wrap'><table><thead><tr><th>Market</th><th>Strategy</th><th>Return</th><th>Trades</th><th>W/L</th><th>Win rate</th><th>Profit factor</th><th>Max drawdown</th></tr></thead><tbody>{backtest_rows}</tbody></table></div><div class='footnote'>Historical results are not a forecast. Do not use the dashboard as a live-trading instruction; it is a paper-trading research record.</div></section>
 </main></body></html>"""
 
 
@@ -63,7 +113,7 @@ def serve(cfg: Config) -> None:
             try:
                 if self.path == "/api/status":
                     body = json.dumps({"backtests": storage.latest_backtests(), "accounts": storage.paper_accounts(),
-                                       "trades": storage.recent_paper_trades()}).encode()
+                                       "trades": storage.recent_paper_trades(), "snapshots": storage.market_snapshots()}).encode()
                     self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
                 else:
                     body = _page(cfg, storage).encode()
