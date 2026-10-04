@@ -69,8 +69,13 @@ def paper_cycle(cfg: Config, storage: Storage, market: BinanceMarketData) -> lis
                     quantity = notional / buy_price
                     fee = notional * cfg.fee_rate
                     account["cash"] -= notional + fee
+                    stop_price = (
+                        strategy.initial_stop(df, i, buy_price)
+                        if strategy.initial_stop is not None
+                        else buy_price - strategy.stop_atr * row.atr
+                    )
                     account.update(quantity=quantity, entry_price=buy_price,
-                                   stop_price=buy_price - strategy.stop_atr * row.atr, high_water=buy_price)
+                                   stop_price=stop_price, high_water=buy_price)
                     storage.save_paper_trade({"symbol": symbol, "strategy_key": key, "side": "BUY",
                                               "price": buy_price, "quantity": quantity, "fee": fee,
                                               "realized_pnl": None, "reason": "entry_signal",

@@ -17,6 +17,7 @@ class Config:
     minimum_notional: float
     history_days: int
     enabled_strategies: list[str]
+    research_only_strategies: list[str]
     database: str
     dashboard_host: str
     dashboard_port: int
@@ -32,4 +33,6 @@ def load_config(path: str | Path = "config.json") -> Config:
         raise ValueError("balances must be positive")
     if not cfg.symbols or len(cfg.symbols) != len(set(cfg.symbols)):
         raise ValueError("symbols must contain at least one unique market")
+    if set(cfg.enabled_strategies) & set(cfg.research_only_strategies):
+        raise ValueError("a strategy cannot be both enabled and research-only")
     return cfg

@@ -16,6 +16,7 @@ def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config, symbol: str
     entry_price = entry_cost = stop_price = high_water = 0.0
     entry_time = None
     pending_entry = pending_exit = False
+    pending_entry_index: int | None = None
     exit_reason = "signal"
     trades: list[dict] = []
     equity_curve: list[float] = []
@@ -31,9 +32,14 @@ def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config, symbol: str
                 fee = notional * cfg.fee_rate
                 cash -= notional + fee
                 entry_price, entry_cost, entry_time = fill, notional + fee, str(row.open_time)
-                stop_price = fill - strategy.stop_atr * row.atr
+                stop_price = (
+                    strategy.initial_stop(df, pending_entry_index, fill)
+                    if strategy.initial_stop is not None
+                    else fill - strategy.stop_atr * row.atr
+                )
                 high_water = fill
             pending_entry = False
+            pending_entry_index = None
 
         if quantity > 0:
             high_water = max(high_water, row.high)
@@ -72,6 +78,7 @@ def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config, symbol: str
 
         if quantity == 0 and not pending_entry and strategy.entry(df, i):
             pending_entry = True
+            pending_entry_index = i
 
         equity_curve.append(cash + quantity * row.close)
 

@@ -13,7 +13,7 @@ A transparent, paper-first Binance Spot strategy research bot for five liquid US
 ## Highlights
 
 - Five parallel markets: BTC, ETH, BNB, SOL, and XRP against USDT
-- Multiple explainable trading strategies with a separate $10 paper balance per market/strategy pair
+- Multiple explainable strategies, plus research-only variants that are backtested but cannot create paper positions
 - Two-year historical backtests with fees, slippage, and next-candle execution
 - Return, win rate, profit factor, trade count, and maximum drawdown tracking
 - Forward-paper positions and trades stored independently from backtests
@@ -32,9 +32,14 @@ A transparent, paper-first Binance Spot strategy research bot for five liquid US
 | EMA trend pullback | Pullback entries during an established trend |
 | Quiet-to-active breakout | Volatility expansion after compression |
 | Bollinger/RSI recovery | Mean recovery with a trend filter |
+| Confirmed liquidity-sweep reclaim | Research-only: reversal after reclaiming a swept 20-candle low |
 | Buy-and-hold benchmark | Baseline using the same position cap |
 
-The dashboard contains the latest saved results. Compare net return, drawdown, profit factor, and sample size together—win rate alone is not enough.
+The dashboard contains the latest saved results. Compare net return, drawdown, profit factor, and sample size together—win rate alone is not enough. Research-only strategies appear in historical results but cannot open a forward-paper account until explicitly promoted after review.
+
+### Liquidity-sweep rule
+
+The long-only liquidity-sweep strategy uses a fully mechanical four-hour rule: the prior candle must wick below the previous 20-candle low, close back above that level, and have a lower wick of at least `0.5 ATR`. A following candle must close above that sweep candle's high while price is above the 200 EMA. The initial stop is below the sweep wick with a `0.25 ATR` buffer; a close below the 50 EMA exits the position. This describes price behaviour only—it does not prove why orders were triggered or promise a reversal.
 
 ## Quick start
 

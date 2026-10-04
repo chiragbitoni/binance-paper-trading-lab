@@ -17,6 +17,9 @@
     "bollinger_rsi",
     "buy_hold_benchmark"
   ],
+  "research_only_strategies": [
+    "liquidity_sweep"
+  ],
   "database": "data/trading_bot.db",
   "dashboard_host": "127.0.0.1",
   "dashboard_port": 8765

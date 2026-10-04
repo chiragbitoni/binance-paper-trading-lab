@@ -35,6 +35,8 @@ def add_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     df["volume_median_20"] = df["volume"].rolling(20).median()
     df["range"] = df["high"] - df["low"]
     df["range_high_20"] = df["high"].shift(1).rolling(20).max()
+    # These reference only candles that completed before the current one.  That
+    # prevents the liquidity-sweep rule from comparing a candle to its own low.
+    df["prior_low_20"] = df["low"].shift(1).rolling(20).min()
     df["atr_ratio_q30"] = df["atr_ratio"].shift(1).rolling(100).quantile(0.30)
     return df
-

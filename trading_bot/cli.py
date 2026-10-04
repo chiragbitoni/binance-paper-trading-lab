@@ -47,7 +47,8 @@ def main() -> None:
             start = end - timedelta(days=cfg.history_days)
             for symbol in cfg.symbols:
                 data = market.candles(symbol, cfg.interval, int(start.timestamp() * 1000), int(end.timestamp() * 1000))
-                for key in cfg.enabled_strategies:
+                strategy_keys = cfg.enabled_strategies + cfg.research_only_strategies
+                for key in strategy_keys:
                     strategy = STRATEGIES[key]
                     result, trades = run_backtest(data, strategy, cfg, symbol)
                     run_id = storage.save_backtest(result, trades)

@@ -7,6 +7,7 @@ import pandas as pd
 
 
 Signal = Callable[[pd.DataFrame, int], bool]
+InitialStop = Callable[[pd.DataFrame, int, float], float]
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class Strategy:
     exit: Signal
     stop_atr: float
     trailing_atr: float | None
+    initial_stop: InitialStop | None = None
 
 
 def _valid(df: pd.DataFrame, i: int, columns: list[str]) -> bool:
@@ -97,6 +99,45 @@ def bollinger_rsi_exit(df: pd.DataFrame, i: int) -> bool:
     return row.close >= row.bb_mid or row.rsi >= 60
 
 
+def liquidity_sweep_entry(df: pd.DataFrame, i: int) -> bool:
+    """Buy a confirmed reclaim after a 20-candle sell-side liquidity sweep.
+
+    The sweep is the previous completed candle: it must pierce the prior
+    20-candle low, reclaim that level by its close, and leave a meaningful lower
+    wick.  The current candle confirms the reclaim by closing above the sweep
+    candle high.  The 200 EMA filter keeps this Spot-only strategy long-only in
+    a broad uptrend.
+    """
+    if i < 2 or not _valid(df, i, ["ema200", "atr"]):
+        return False
+    sweep = df.iloc[i - 1]
+    confirm = df.iloc[i]
+    level = sweep.prior_low_20
+    if pd.isna(level) or pd.isna(sweep.atr):
+        return False
+    lower_wick = min(sweep.open, sweep.close) - sweep.low
+    return (
+        confirm.close > confirm.ema200
+        and sweep.low < level
+        and sweep.close > level
+        and lower_wick >= 0.5 * sweep.atr
+        and confirm.close > sweep.high
+    )
+
+
+def liquidity_sweep_exit(df: pd.DataFrame, i: int) -> bool:
+    """Exit when the post-sweep recovery fails its medium-term trend filter."""
+    return _valid(df, i, ["ema50"]) and df.iloc[i].close < df.iloc[i].ema50
+
+
+def liquidity_sweep_initial_stop(df: pd.DataFrame, i: int, fill: float) -> float:
+    """Place the invalidation beyond the sweep wick with a small ATR buffer."""
+    sweep = df.iloc[i - 1]
+    wick_stop = sweep.low - 0.25 * sweep.atr
+    # A gap at execution must never create a stop above the actual fill.
+    return min(wick_stop, fill - 0.5 * sweep.atr)
+
+
 def buy_hold_entry(df: pd.DataFrame, i: int) -> bool:
     return i == 200
 
@@ -124,6 +165,10 @@ STRATEGIES: dict[str, Strategy] = {
     "bollinger_rsi": Strategy("bollinger_rsi", "Trend-filtered Bollinger recovery",
                               "Buys an oversold Bollinger move only above the 200 EMA.",
                               bollinger_rsi_entry, bollinger_rsi_exit, 2.0, None),
+    "liquidity_sweep": Strategy("liquidity_sweep", "Confirmed liquidity-sweep reclaim",
+                                 "Buys a 20-candle low sweep only after a 4h reclaim and confirmation above the sweep high.",
+                                 liquidity_sweep_entry, liquidity_sweep_exit, 2.0, None,
+                                 liquidity_sweep_initial_stop),
     "buy_hold_benchmark": Strategy("buy_hold_benchmark", "Buy-and-hold benchmark",
                                    "Buys once at the common warm-up point and holds to the test end.",
                                    buy_hold_entry, never_exit, 1000.0, None),
