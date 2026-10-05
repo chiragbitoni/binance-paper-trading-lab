@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS futures_snapshots (
   mark_price REAL,
   funding_rate REAL,
   next_funding_time INTEGER,
+  data_source TEXT NOT NULL DEFAULT 'USD-M Futures',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS futures_candles (
@@ -182,6 +183,9 @@ class Storage:
         trade_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(paper_trades)")}
         if "symbol" not in trade_columns:
             self.connection.execute("ALTER TABLE paper_trades ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTCUSDT'")
+        futures_snapshot_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(futures_snapshots)")}
+        if futures_snapshot_columns and "data_source" not in futures_snapshot_columns:
+            self.connection.execute("ALTER TABLE futures_snapshots ADD COLUMN data_source TEXT NOT NULL DEFAULT 'USD-M Futures'")
         self.connection.commit()
 
     def close(self) -> None:
@@ -364,12 +368,12 @@ class Storage:
 
     def save_futures_snapshot(self, snapshot: dict) -> None:
         self.connection.execute(
-            """INSERT INTO futures_snapshots(symbol,candle_time,close,mark_price,funding_rate,next_funding_time)
-            VALUES (?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET candle_time=excluded.candle_time,
+            """INSERT INTO futures_snapshots(symbol,candle_time,close,mark_price,funding_rate,next_funding_time,data_source)
+            VALUES (?,?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET candle_time=excluded.candle_time,
             close=excluded.close,mark_price=excluded.mark_price,funding_rate=excluded.funding_rate,
-            next_funding_time=excluded.next_funding_time,updated_at=CURRENT_TIMESTAMP""",
+            next_funding_time=excluded.next_funding_time,data_source=excluded.data_source,updated_at=CURRENT_TIMESTAMP""",
             (snapshot["symbol"], snapshot["candle_time"], snapshot["close"], snapshot.get("mark_price"),
-             snapshot.get("funding_rate"), snapshot.get("next_funding_time")),
+             snapshot.get("funding_rate"), snapshot.get("next_funding_time"), snapshot.get("data_source", "USD-M Futures")),
         )
         self.connection.commit()
 

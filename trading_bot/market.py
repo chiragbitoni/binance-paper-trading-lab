@@ -107,16 +107,27 @@ class BinanceFuturesMarketData:
     def __init__(self, timeout: int = 15):
         self.timeout = timeout
         self.session = requests.Session()
+        self.candle_sources: dict[str, str] = {}
 
     def candles(self, symbol: str, interval: str, limit: int = 300) -> pd.DataFrame:
-        response = self.session.get(
-            f"{FUTURES_MARKET_DATA_API}/fapi/v1/klines",
-            params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=self.timeout,
-        )
-        response.raise_for_status()
+        try:
+            response = self.session.get(
+                f"{FUTURES_MARKET_DATA_API}/fapi/v1/klines",
+                params={"symbol": symbol, "interval": interval, "limit": limit}, timeout=self.timeout,
+            )
+            response.raise_for_status()
+            rows = response.json()
+            self.candle_sources[symbol] = "USD-M Futures"
+        except requests.RequestException:
+            # Some cloud regions receive a Binance Futures location restriction.
+            # Keep the paper scheduler alive with the project's existing public
+            # Spot feed, but expose this as a proxy in the dashboard rather
+            # than implying that it is derivative-market data.
+            self.candle_sources[symbol] = "Spot proxy (USD-M unavailable)"
+            return BinanceMarketData(timeout=self.timeout).candles(symbol, interval, limit=limit)
         columns = ["open_time", "open", "high", "low", "close", "volume", "close_time",
                    "quote_volume", "trades", "taker_base", "taker_quote", "ignore"]
-        frame = pd.DataFrame(response.json(), columns=columns)
+        frame = pd.DataFrame(rows, columns=columns)
         if frame.empty:
             return frame
         numeric = ["open", "high", "low", "close", "volume", "quote_volume", "taker_base", "taker_quote"]
@@ -127,6 +138,8 @@ class BinanceFuturesMarketData:
         return frame.drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
 
     def premium_index(self, symbol: str) -> dict:
+        if self.candle_sources.get(symbol) != "USD-M Futures":
+            return {"mark_price": None, "funding_rate": None, "next_funding_time": None}
         response = self.session.get(
             f"{FUTURES_MARKET_DATA_API}/fapi/v1/premiumIndex", params={"symbol": symbol}, timeout=self.timeout,
         )

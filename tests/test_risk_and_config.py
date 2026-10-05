@@ -4,8 +4,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pandas as pd
+import requests
 
 from trading_bot.config import load_config
 from trading_bot.futures import _liquidity_delta_signal
@@ -39,6 +41,22 @@ class ConfigSafetyTests(unittest.TestCase):
 
     def test_futures_market_client_has_no_order_method(self) -> None:
         self.assertFalse(hasattr(BinanceFuturesMarketData, "market_order"))
+
+    def test_futures_market_data_uses_labelled_spot_proxy_when_usdm_is_unavailable(self) -> None:
+        client = BinanceFuturesMarketData()
+        response = Mock()
+        response.raise_for_status.side_effect = requests.HTTPError("restricted")
+        client.session = Mock()
+        client.session.get.return_value = response
+        proxy_frame = pd.DataFrame({"marker": [1]})
+        proxy = Mock()
+        proxy.candles.return_value = proxy_frame
+        with patch("trading_bot.market.BinanceMarketData", return_value=proxy):
+            self.assertIs(client.candles("BTCUSDT", "4h"), proxy_frame)
+        self.assertEqual(client.candle_sources["BTCUSDT"], "Spot proxy (USD-M unavailable)")
+        self.assertEqual(client.premium_index("BTCUSDT"), {
+            "mark_price": None, "funding_rate": None, "next_funding_time": None,
+        })
 
     def test_live_mode_is_rejected(self) -> None:
         source = Path("config.json")

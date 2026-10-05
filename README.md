@@ -114,6 +114,8 @@ python -m unittest discover -s tests -v  Run safety and configuration tests
 
 The workflow uses no Binance credentials and never invokes a live-order client. The Futures component uses public USD-M candles and mark/funding data only; it cannot submit a futures order.
 
+If Binance restricts USD-M market-data access from the GitHub Actions region, the Futures paper cycle falls back to the project's public Spot candle feed so the scheduler can still run. The Futures dashboard labels that state as **Spot proxy (USD-M unavailable)** and leaves mark/funding fields blank; it is intentionally not presented as Futures data.
+
 ## Security and optional Binance connectivity
 
 Paper mode needs no API key. For a read-only connectivity test, provide credentials only as local environment variables:
