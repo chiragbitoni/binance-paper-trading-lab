@@ -13,8 +13,38 @@ from .market import BinanceFuturesMarketData
 from .storage import Storage
 
 
-def _signal(df: pd.DataFrame, i: int) -> str | None:
-    """Conservative trend-pullback entry; returns a direction, never an order."""
+def _liquidity_delta_signal(df: pd.DataFrame, i: int) -> tuple[str, str] | None:
+    """Confirm a 20-candle liquidity sweep with directional taker-volume delta."""
+    if i < 2:
+        return None
+    sweep, confirm = df.iloc[i - 1], df.iloc[i]
+    required = (sweep.prior_low_20, sweep.prior_high_20, sweep.atr, confirm.ema20,
+                confirm.ema50, confirm.ema200, confirm.rsi, confirm.volume_median_20,
+                confirm.delta_ratio, confirm.delta_quote, confirm.delta_quote_abs_median_20)
+    if any(pd.isna(value) for value in required):
+        return None
+    volume_ok = confirm.volume > confirm.volume_median_20
+    lower_wick = min(sweep.open, sweep.close) - sweep.low
+    upper_wick = sweep.high - max(sweep.open, sweep.close)
+    long_sweep = (confirm.ema50 > confirm.ema200 and sweep.low < sweep.prior_low_20
+                  and sweep.close > sweep.prior_low_20 and lower_wick >= 0.5 * sweep.atr
+                  and confirm.close > sweep.high and confirm.close > confirm.ema20
+                  and 50 <= confirm.rsi <= 75 and volume_ok and confirm.delta_ratio >= 0.10
+                  and confirm.delta_quote >= confirm.delta_quote_abs_median_20)
+    if long_sweep:
+        return "LONG", "liquidity sweep + positive delta"
+    short_sweep = (confirm.ema50 < confirm.ema200 and sweep.high > sweep.prior_high_20
+                   and sweep.close < sweep.prior_high_20 and upper_wick >= 0.5 * sweep.atr
+                   and confirm.close < sweep.low and confirm.close < confirm.ema20
+                   and 25 <= confirm.rsi <= 50 and volume_ok and confirm.delta_ratio <= -0.10
+                   and -confirm.delta_quote >= confirm.delta_quote_abs_median_20)
+    if short_sweep:
+        return "SHORT", "liquidity sweep + negative delta"
+    return None
+
+
+def _signal(df: pd.DataFrame, i: int) -> tuple[str, str] | None:
+    """Return a direction/setup only after trend, liquidity or delta confirmation."""
     if i < 200:
         return None
     row, previous = df.iloc[i], df.iloc[i - 1]
@@ -23,13 +53,16 @@ def _signal(df: pd.DataFrame, i: int) -> str | None:
     if any(pd.isna(value) for value in values) or row.atr <= 0:
         return None
     volume_ok = row.volume > row.volume_median_20
+    # Existing trend-pullback setup now requires candle delta to agree with the
+    # direction. The independent sweep setup below adds a stricter liquidity
+    # reclaim/rejection path for markets that do not make a clean EMA pullback.
     if (row.ema50 > row.ema200 and row.close > row.ema20 and previous.close <= previous.ema20
-            and 50 <= row.rsi <= 70 and volume_ok):
-        return "LONG"
+            and 50 <= row.rsi <= 70 and volume_ok and row.delta_ratio >= 0.05):
+        return "LONG", "EMA pullback + positive delta"
     if (row.ema50 < row.ema200 and row.close < row.ema20 and previous.close >= previous.ema20
-            and 30 <= row.rsi <= 50 and volume_ok):
-        return "SHORT"
-    return None
+            and 30 <= row.rsi <= 50 and volume_ok and row.delta_ratio <= -0.05):
+        return "SHORT", "EMA pullback + negative delta"
+    return _liquidity_delta_signal(df, i)
 
 
 def _entry_price(open_price: float, side: str, slip: float) -> float:
@@ -162,12 +195,13 @@ def futures_paper_cycle(cfg: Config, storage: Storage, market: BinanceFuturesMar
     if storage.futures_position() is None and storage.futures_pending_order() is None:
         for symbol in options["symbols"]:
             df = completed[symbol]
-            side = _signal(df, len(df) - 1)
+            signal = _signal(df, len(df) - 1)
             snapshot = next(item for item in storage.futures_snapshots() if item["symbol"] == symbol)
             funding = snapshot.get("funding_rate")
-            if side and (funding is None or abs(funding) <= float(options["max_entry_funding_rate"])):
+            if signal and (funding is None or abs(funding) <= float(options["max_entry_funding_rate"])):
+                side, setup = signal
                 storage.set_futures_pending_order(symbol, side, str(df.iloc[-1].open_time))
-                messages.append(f"{symbol} {side}: confirmed signal queued for next 4h open")
+                messages.append(f"{symbol} {side}: {setup} signal queued for next 4h open")
                 break
     return messages
 
@@ -225,7 +259,7 @@ def render_futures_static(cfg: Config, output: str = "docs/futures.html") -> Non
     leverage = cfg.futures_paper["leverage"]
     page = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Futures Paper Lab</title><style>
 :root{{--bg:#090d19;--panel:#111827;--line:#29364f;--text:#edf3ff;--muted:#94a3b8;--blue:#78a9ff;--green:#55d998;--red:#ff7b8b}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 20% -10%,#1b3059 0,transparent 36%),var(--bg);color:var(--text);font:14px system-ui,sans-serif}}main{{max-width:1240px;margin:auto;padding:34px 24px 48px}}a{{color:var(--blue);font-weight:700;text-decoration:none}}h1{{font-size:30px;margin:10px 0 6px}}h2{{font-size:19px;margin:0}}p{{color:var(--muted);line-height:1.55}}.badge{{display:inline-block;background:#3c2616;color:#ffd28a;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;letter-spacing:.06em}}.top{{display:flex;justify-content:space-between;gap:16px;align-items:start}}.metrics{{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin:20px 0}}.metric,.section{{background:linear-gradient(145deg,#151f33,#111827);border:1px solid var(--line);border-radius:16px}}.metric{{padding:17px}}.metric span{{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;font-weight:700}}.metric strong{{font-size:23px;display:block;margin:8px 0 2px}}.section{{padding:18px;margin-top:16px;overflow:hidden}}.table-wrap{{overflow:auto}}table{{border-collapse:collapse;width:100%;white-space:nowrap}}th,td{{padding:11px 9px;text-align:left;border-bottom:1px solid var(--line)}}th{{font-size:11px;color:var(--blue);letter-spacing:.05em}}.long,.green{{color:var(--green);font-weight:800}}.short,.red{{color:var(--red);font-weight:800}}.note{{border-left:3px solid #fbc96a;background:#292313;color:#e9d6a3;padding:10px 12px;font-size:12px}}.chart-controls{{display:flex;justify-content:space-between;gap:12px;margin-bottom:9px;color:var(--muted);font-size:12px}}.chart-controls strong{{display:block;color:var(--text);margin-bottom:3px}}.chart-buttons{{display:flex;gap:6px}}button{{border:1px solid #334463;background:#121d30;color:#b9ceef;border-radius:7px;padding:5px 9px;font-weight:700;cursor:pointer}}.chart-canvas-wrap{{position:relative;background:#0a101c;border:1px solid #202c42;border-radius:10px;overflow:hidden}}canvas{{display:block;width:100%;touch-action:none;cursor:crosshair}}.chart-tooltip{{position:absolute;z-index:2;min-width:170px;padding:8px 9px;background:#111c30ef;border:1px solid #425575;border-radius:8px;color:#cbd8ee;font-size:11px;line-height:1.55;pointer-events:none}}.empty{{padding:24px 0}}@media(max-width:760px){{main{{padding:22px 14px}}.top{{display:block}}.metrics{{grid-template-columns:repeat(2,1fr)}}.chart-controls{{flex-direction:column}}}}
-</style></head><body><main><header class='top'><div><span class='badge'>PAPER FUTURES · NO ACCOUNT CONNECTION · NO ORDERS</span><h1>Futures Paper Lab</h1><p>One shared simulated wallet, long/short signals, isolated {leverage}× notional cap, and public market data only.</p></div><a href='index.html'>← Spot dashboard</a></header><div class='metrics'><div class='metric'><span>Paper wallet cash</span><strong>{_money(wallet['cash'])}</strong><small>Starting balance {_money(cfg.futures_paper['starting_balance'])}</small></div><div class='metric'><span>Leverage cap</span><strong>{leverage}×</strong><small>{_money(cfg.futures_paper['margin_per_trade'])} margin per attempt</small></div><div class='metric'><span>Open P&amp;L</span><strong>{_money(unrealized)}</strong><small>Marked from public mark price when available</small></div><div class='metric'><span>Queued setup</span><strong>{'Yes' if pending else 'No'}</strong><small>{pending_html}</small></div></div><section class='section'><h2>Open simulated position</h2><div class='table-wrap'><table><thead><tr><th>Market</th><th>Side</th><th>Entry</th><th>Mark</th><th>Stop</th><th>Take profit</th><th>Margin</th><th>Open P&amp;L</th><th>Funding paid</th></tr></thead><tbody>{position_html}</tbody></table></div></section><section class='section'><h2>Position risk / reward chart</h2><p>Green is the simulated take-profit area. Red is the simulated stop-loss area. Stop is checked first if a single OHLC candle crosses both levels.</p>{chart}</section><section class='section'><h2>Market and funding context</h2><div class='table-wrap'><table><thead><tr><th>Market</th><th>Last completed close</th><th>Public mark</th><th>Last funding rate</th></tr></thead><tbody>{funding_html}</tbody></table></div></section><section class='section'><h2>Simulated trade ledger</h2><div class='table-wrap'><table><thead><tr><th>Recorded UTC</th><th>Market</th><th>Side</th><th>Action</th><th>Price</th><th>Realized P&amp;L</th><th>Reason</th></tr></thead><tbody>{trade_html}</tbody></table></div></section><p class='note'>Entry: EMA 50/200 trend regime + EMA 20 pullback/reclaim + RSI and above-median volume. Initial stop: 2 ATR. Target: 3.5 ATR (1.75R). Trailing stop: 2.5 ATR. This is a paper experiment, not a profitable-system claim or a live-trading recommendation.</p></main>{_interactive_chart_script()}</body></html>"""
+</style></head><body><main><header class='top'><div><span class='badge'>PAPER FUTURES · NO ACCOUNT CONNECTION · NO ORDERS</span><h1>Futures Paper Lab</h1><p>One shared simulated wallet, long/short signals, isolated {leverage}× notional cap, and public market data only.</p></div><a href='index.html'>← Spot dashboard</a></header><div class='metrics'><div class='metric'><span>Paper wallet cash</span><strong>{_money(wallet['cash'])}</strong><small>Starting balance {_money(cfg.futures_paper['starting_balance'])}</small></div><div class='metric'><span>Leverage cap</span><strong>{leverage}×</strong><small>{_money(cfg.futures_paper['margin_per_trade'])} margin per attempt</small></div><div class='metric'><span>Open P&amp;L</span><strong>{_money(unrealized)}</strong><small>Marked from public mark price when available</small></div><div class='metric'><span>Queued setup</span><strong>{'Yes' if pending else 'No'}</strong><small>{pending_html}</small></div></div><section class='section'><h2>Open simulated position</h2><div class='table-wrap'><table><thead><tr><th>Market</th><th>Side</th><th>Entry</th><th>Mark</th><th>Stop</th><th>Take profit</th><th>Margin</th><th>Open P&amp;L</th><th>Funding paid</th></tr></thead><tbody>{position_html}</tbody></table></div></section><section class='section'><h2>Position risk / reward chart</h2><p>Green is the simulated take-profit area. Red is the simulated stop-loss area. Stop is checked first if a single OHLC candle crosses both levels.</p>{chart}</section><section class='section'><h2>Market and funding context</h2><div class='table-wrap'><table><thead><tr><th>Market</th><th>Last completed close</th><th>Public mark</th><th>Last funding rate</th></tr></thead><tbody>{funding_html}</tbody></table></div></section><section class='section'><h2>Simulated trade ledger</h2><div class='table-wrap'><table><thead><tr><th>Recorded UTC</th><th>Market</th><th>Side</th><th>Action</th><th>Price</th><th>Realized P&amp;L</th><th>Reason</th></tr></thead><tbody>{trade_html}</tbody></table></div></section><p class='note'>Entries require either an EMA 50/200 trend pullback with directional candle delta, or a 20-candle liquidity sweep confirmed by strong directional delta. Both require RSI and above-median volume. Initial stop: 2 ATR. Target: 3.5 ATR (1.75R). Trailing stop: 2.5 ATR. This is a paper experiment, not a profitable-system claim or a live-trading recommendation.</p></main>{_interactive_chart_script()}</body></html>"""
     from pathlib import Path
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)

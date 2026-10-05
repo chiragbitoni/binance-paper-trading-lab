@@ -38,6 +38,9 @@ def add_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     # These reference only candles that completed before the current one.  That
     # prevents the liquidity-sweep rule from comparing a candle to its own low.
     df["prior_low_20"] = df["low"].shift(1).rolling(20).min()
+    # Mirror the low-side reference so a Futures short can use the same
+    # mechanical liquidity-sweep definition at a prior swing high.
+    df["prior_high_20"] = df["high"].shift(1).rolling(20).max()
     # Binance klines include taker-buy volume.  The remainder of total volume
     # is taker-sell volume, letting us calculate an exchange-specific, candle
     # level delta proxy without inventing a trade side from OHLC prices.

@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from trading_bot.config import load_config
+from trading_bot.futures import _liquidity_delta_signal
 from trading_bot.market import BinanceFuturesMarketData, BinanceLiveClient
 from trading_bot.paper import paper_cycle
 from trading_bot.risk import advance_trailing_stop, stop_fill_price
@@ -133,6 +134,29 @@ class PaperExecutionTests(unittest.TestCase):
                     storage.close()
         finally:
             STRATEGIES.pop(strategy.key, None)
+
+
+class FuturesSignalTests(unittest.TestCase):
+    def test_liquidity_sweep_needs_directional_delta_for_long_and_short(self) -> None:
+        base = {
+            "open": 105.0, "high": 108.0, "low": 102.0, "close": 105.0, "prior_low_20": 100.0,
+            "prior_high_20": 130.0, "atr": 10.0, "ema20": 104.0, "ema50": 120.0, "ema200": 110.0,
+            "rsi": 60.0, "volume": 200.0, "volume_median_20": 100.0, "delta_ratio": 0.2,
+            "delta_quote": 100.0, "delta_quote_abs_median_20": 50.0,
+        }
+        long_sweep = {**base, "open": 102.0, "low": 90.0, "high": 108.0, "close": 105.0}
+        long_confirm = {**base, "open": 106.0, "low": 104.0, "high": 112.0, "close": 110.0,
+                        "ema20": 107.0}
+        long_frame = pd.DataFrame([base, long_sweep, long_confirm])
+        self.assertEqual(_liquidity_delta_signal(long_frame, 2), ("LONG", "liquidity sweep + positive delta"))
+
+        short_sweep = {**base, "open": 128.0, "high": 140.0, "low": 122.0, "close": 125.0,
+                       "prior_high_20": 130.0, "ema50": 100.0, "ema200": 110.0}
+        short_confirm = {**base, "open": 124.0, "high": 126.0, "low": 115.0, "close": 118.0,
+                         "ema20": 120.0, "ema50": 100.0, "ema200": 110.0, "rsi": 40.0,
+                         "delta_ratio": -0.2, "delta_quote": -100.0}
+        short_frame = pd.DataFrame([base, short_sweep, short_confirm])
+        self.assertEqual(_liquidity_delta_signal(short_frame, 2), ("SHORT", "liquidity sweep + negative delta"))
 
 
 if __name__ == "__main__":

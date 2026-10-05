@@ -20,7 +20,7 @@ A transparent, paper-first Binance strategy research bot for five liquid USDT ma
 - Decision dashboard with portfolio equity, mark P&L, stops, candle delta, trade ledger, and research results
 - Dedicated candlestick chart page that groups all open strategy positions for each ticker
 - TradingView-style chart overlays: EMA 20/50/200, 20-candle support/resistance, entry, stop, and green/red risk-reward areas
-- Separate USD-M Futures paper lab: long/short setup research, a single shared simulated wallet, 3× maximum simulated leverage, ATR stops/targets, and public funding/mark context
+- Separate USD-M Futures paper lab: long/short setup research using EMA pullbacks with candle-delta confirmation and liquidity-sweep/delta setups, a single shared simulated wallet, 3× maximum simulated leverage, ATR stops/targets, and public funding/mark context
 - Binance market-data-only API; no credentials required for paper mode
 - Automated four-hour updates through GitHub Actions
 - Lightweight dashboard published through GitHub Pages
