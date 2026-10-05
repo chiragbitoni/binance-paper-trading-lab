@@ -17,6 +17,7 @@ A transparent, paper-first Binance strategy research bot for five liquid USDT ma
 - Two-year historical backtests and forward-paper signals with fees, slippage, and next-candle-open execution
 - Return, win rate, profit factor, trade count, and maximum drawdown tracking
 - Forward-paper positions and trades stored independently from backtests
+- Every simulated Spot and Futures position uses a completed-candle ATR trailing stop; strategy-specific trails override the common 2.5 ATR default where configured
 - Decision dashboard with portfolio equity, mark P&L, stops, candle delta, trade ledger, and research results
 - Dedicated candlestick chart page that groups all open strategy positions for each ticker
 - TradingView-style chart overlays: EMA 20/50/200, 20-candle support/resistance, entry, stop, and green/red risk-reward areas
@@ -81,6 +82,8 @@ Edit `config.json` to change the symbol, candle interval, simulated balance, pos
 - Maximum position: `$8`
 - Minimum notional: `$5`
 - Historical window: `730` days
+- Spot trailing-stop default: `2.5 ATR` on every strategy; strategies with their own trailing distance keep that distance
+- Futures trailing-stop distance: `2.5 ATR`
 - Futures simulation: one `$10` shared wallet, `$5` simulated margin per attempt, maximum `3x` notional, and a separate `4h` watchlist
 
 Backtest statistics and forward-paper results are intentionally stored separately in `data/trading_bot.db`.

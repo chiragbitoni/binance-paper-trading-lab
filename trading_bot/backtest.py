@@ -54,7 +54,8 @@ def run_backtest(raw: pd.DataFrame, strategy: Strategy, cfg: Config, symbol: str
                 exit_fill_override = None
             else:
                 stop_price, high_water = advance_trailing_stop(
-                    stop_price, high_water, row.high, row.atr, strategy.trailing_atr
+                    stop_price, high_water, row.high, row.atr,
+                    strategy.trailing_atr if strategy.trailing_atr is not None else cfg.trailing_stop_atr,
                 )
 
         closed_this_bar = False

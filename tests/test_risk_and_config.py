@@ -128,6 +128,9 @@ class PaperExecutionTests(unittest.TestCase):
                     account = storage.paper_accounts()[0]
                     self.assertGreater(account["quantity"], 0.0)
                     self.assertIsNone(account["pending_order"])
+                    # The test strategy has no strategy-specific trail. The
+                    # universal 2.5 ATR Spot trail must still tighten its stop.
+                    self.assertAlmostEqual(account["stop_price"], opens[201] + 2.0 - 2.5 * 4.0)
                     trade = storage.recent_paper_trades()[0]
                     self.assertEqual(trade["price"], opens[201] * (1 + cfg.slippage_rate))
                 finally:

@@ -7,6 +7,7 @@
   "fee_rate": 0.001,
   "slippage_rate": 0.0005,
   "minimum_notional": 5.0,
+  "trailing_stop_atr": 2.5,
   "history_days": 730,
   "enabled_strategies": [
     "golden_cross"
@@ -35,6 +36,7 @@
     "fee_rate": 0.0005,
     "slippage_rate": 0.0005,
     "minimum_notional": 5.0,
-    "max_entry_funding_rate": 0.0005
+    "max_entry_funding_rate": 0.0005,
+    "trailing_stop_atr": 2.5
   }
 }

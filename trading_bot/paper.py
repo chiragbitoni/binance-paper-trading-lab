@@ -111,7 +111,7 @@ def paper_cycle(cfg: Config, storage: Storage, market: BinanceMarketData) -> lis
                 else:
                     stop_price, high_water = advance_trailing_stop(
                         stop_price, account["high_water"] or account["entry_price"], row.high, row.atr,
-                        strategy.trailing_atr,
+                        strategy.trailing_atr if strategy.trailing_atr is not None else cfg.trailing_stop_atr,
                     )
                     account["stop_price"] = stop_price
                     account["high_water"] = high_water

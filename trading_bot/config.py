@@ -15,6 +15,7 @@ class Config:
     fee_rate: float
     slippage_rate: float
     minimum_notional: float
+    trailing_stop_atr: float
     history_days: int
     enabled_strategies: list[str]
     research_only_strategies: list[str]
@@ -34,6 +35,8 @@ def load_config(path: str | Path = "config.json") -> Config:
         raise ValueError("balances must be positive")
     if cfg.minimum_notional <= 0:
         raise ValueError("minimum_notional must be positive")
+    if cfg.trailing_stop_atr <= 0:
+        raise ValueError("trailing_stop_atr must be positive")
     if not 0 <= cfg.fee_rate < 1 or not 0 <= cfg.slippage_rate < 1:
         raise ValueError("fee_rate and slippage_rate must be between 0 (inclusive) and 1 (exclusive)")
     if cfg.history_days < 35:
@@ -48,7 +51,7 @@ def load_config(path: str | Path = "config.json") -> Config:
         raise ValueError(f"unknown strategy keys: {', '.join(sorted(unknown))}")
     futures = cfg.futures_paper
     required_futures = {"enabled", "symbols", "interval", "starting_balance", "margin_per_trade", "leverage",
-                        "fee_rate", "slippage_rate", "minimum_notional", "max_entry_funding_rate"}
+                        "fee_rate", "slippage_rate", "minimum_notional", "max_entry_funding_rate", "trailing_stop_atr"}
     missing_futures = required_futures - set(futures)
     if missing_futures:
         raise ValueError(f"futures_paper is missing: {', '.join(sorted(missing_futures))}")
@@ -56,6 +59,8 @@ def load_config(path: str | Path = "config.json") -> Config:
         raise ValueError("futures_paper leverage must be between 0 and 3 for this paper lab")
     if futures["starting_balance"] <= 0 or futures["margin_per_trade"] <= 0 or futures["minimum_notional"] <= 0:
         raise ValueError("futures_paper balances must be positive")
+    if futures["trailing_stop_atr"] <= 0:
+        raise ValueError("futures_paper trailing_stop_atr must be positive")
     if not 0 <= futures["fee_rate"] < 1 or not 0 <= futures["slippage_rate"] < 1:
         raise ValueError("futures_paper fee_rate and slippage_rate must be between 0 and 1")
     if not futures["symbols"] or len(futures["symbols"]) != len(set(futures["symbols"])):
