@@ -45,7 +45,8 @@ def load_config(path: str | Path = "config.json") -> Config:
     if not cfg.symbols or len(cfg.symbols) != len(set(cfg.symbols)):
         raise ValueError("symbols must contain at least one unique market")
     dhan = cfg.dhan_mcx
-    required_dhan = {"enabled", "live_order_submission", "allocated_capital_inr", "max_daily_loss_inr",
+    required_dhan = {"enabled", "live_order_submission", "auto_trade_enabled", "minimum_signal_confidence",
+                     "watchlist", "allocated_capital_inr", "max_daily_loss_inr",
                      "max_loss_per_trade_inr", "max_open_positions", "default_product_type",
                      "auto_square_off_minutes_before_close", "allowed_security_ids"}
     missing_dhan = required_dhan - set(dhan)
@@ -62,6 +63,19 @@ def load_config(path: str | Path = "config.json") -> Config:
         raise ValueError("dhan_mcx risk amounts cannot be negative")
     if dhan["live_order_submission"] and not dhan["enabled"]:
         raise ValueError("dhan_mcx must be enabled before live_order_submission can be enabled")
+    if dhan["auto_trade_enabled"] and not dhan["live_order_submission"]:
+        raise ValueError("dhan_mcx auto_trade_enabled requires live_order_submission")
+    if not 0 <= float(dhan["minimum_signal_confidence"]) <= 1:
+        raise ValueError("dhan_mcx minimum_signal_confidence must be between 0 and 1")
+    if not isinstance(dhan["watchlist"], list):
+        raise ValueError("dhan_mcx watchlist must be a list")
+    for item in dhan["watchlist"]:
+        required_watch = {"security_id", "instrument", "quantity", "session_start_ist", "session_end_ist"}
+        missing_watch = required_watch - set(item)
+        if missing_watch:
+            raise ValueError(f"dhan_mcx watchlist item is missing: {', '.join(sorted(missing_watch))}")
+        if int(item["quantity"]) <= 0:
+            raise ValueError("dhan_mcx watchlist quantity must be positive")
     if set(cfg.enabled_strategies) & set(cfg.research_only_strategies):
         raise ValueError("a strategy cannot be both enabled and research-only")
     from .strategies import STRATEGIES

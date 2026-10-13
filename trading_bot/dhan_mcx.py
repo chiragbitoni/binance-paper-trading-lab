@@ -8,9 +8,14 @@ are read only from environment variables and are never written to disk.
 from __future__ import annotations
 
 import os
+import sqlite3
+import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -19,6 +24,8 @@ import requests
 DHAN_V2 = "https://api.dhan.co/v2"
 MCX_SEGMENT = "MCX_COMM"
 LIVE_ACKNOWLEDGEMENT = "I_UNDERSTAND_DHAN_LIVE_ORDERS"
+AUTOMATION_ACKNOWLEDGEMENT = "I_UNDERSTAND_DHAN_AUTOMATION"
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class DhanAPIError(RuntimeError):
@@ -42,6 +49,7 @@ class MCXTradePlan:
     trailing_jump: float = 0.0
     product_type: str = "INTRADAY"
     entry_order_type: str = "LIMIT"
+    correlation_id: str | None = None
 
     def validate(self) -> None:
         if not self.security_id.strip():
@@ -71,7 +79,7 @@ class MCXTradePlan:
         self.validate()
         return {
             "dhanClientId": client_id,
-            "correlationId": f"mcx-{uuid.uuid4().hex[:20]}",
+            "correlationId": self.correlation_id or f"mcx-{uuid.uuid4().hex[:20]}",
             "transactionType": self.side,
             "exchangeSegment": MCX_SEGMENT,
             "productType": self.product_type,
@@ -174,6 +182,9 @@ class DhanMCXClient:
         if not self.allow_live_orders:
             raise LiveOrderLocked("Dhan live-order gate is locked")
         return self._request("POST", "/super/orders", plan.as_super_order(self.client_id))
+
+    def order_by_correlation(self, correlation_id: str) -> dict:
+        return self._request("GET", f"/orders/external/{correlation_id}")
 
 
 @dataclass(frozen=True)
@@ -334,11 +345,123 @@ class MCXExecutionEngine:
             "protection": "Dhan Super Order: entry + target + stop-loss + optional trailing jump",
         }
 
-    def execute(self, plan: MCXTradePlan, *, confirmed: bool) -> dict:
+    def execute(self, plan: MCXTradePlan, *, confirmed: bool, automated: bool = False) -> dict:
         preview = self.preview(plan)
         if not confirmed:
             raise LiveOrderLocked("pass --confirm-live after reviewing the preview")
         if not self.options.get("live_order_submission"):
             raise LiveOrderLocked("dhan_mcx.live_order_submission is false")
+        if automated:
+            if not self.options.get("auto_trade_enabled"):
+                raise LiveOrderLocked("dhan_mcx.auto_trade_enabled is false")
+            if os.getenv("DHAN_AUTOMATION_ACK") != AUTOMATION_ACKNOWLEDGEMENT:
+                raise LiveOrderLocked("DHAN_AUTOMATION_ACK is missing")
         response = self.client.place_super_order(plan)
         return {"preview": preview, "broker_response": response}
+
+
+class DhanMCXAutopilot:
+    """Process a configured watchlist once per completed candle.
+
+    The local state table makes a unique (security, candle) signal a one-shot
+    broker request. If a request has an uncertain outcome, it is marked for
+    reconciliation rather than retried automatically, avoiding duplicate live
+    orders after a network timeout.
+    """
+
+    def __init__(self, options: dict, engine: MCXExecutionEngine, client: DhanMCXClient,
+                 state_path: str = "data/dhan_mcx_autopilot.db") -> None:
+        self.options, self.engine, self.client = options, engine, client
+        path = Path(state_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.connection = sqlite3.connect(path)
+        self.connection.execute("PRAGMA busy_timeout = 5000")
+        self.connection.execute("""CREATE TABLE IF NOT EXISTS submitted_signals (
+            security_id TEXT NOT NULL, candle_time TEXT NOT NULL, correlation_id TEXT NOT NULL,
+            status TEXT NOT NULL, response TEXT, PRIMARY KEY (security_id, candle_time))""")
+        self.connection.commit()
+
+    @staticmethod
+    def _within_session(item: dict, now: datetime) -> bool:
+        current = now.strftime("%H:%M")
+        start, end = item["session_start_ist"], item["session_end_ist"]
+        return start <= current <= end if start <= end else current >= start or current <= end
+
+    def _already_processed(self, security_id: str, candle_time: str) -> bool:
+        return self.connection.execute("SELECT 1 FROM submitted_signals WHERE security_id=? AND candle_time=?",
+                                       (security_id, candle_time)).fetchone() is not None
+
+    def _reserve(self, security_id: str, candle_time: str, correlation_id: str) -> bool:
+        try:
+            self.connection.execute("INSERT INTO submitted_signals VALUES (?,?,?,?,NULL)",
+                                    (security_id, candle_time, correlation_id, "reserved"))
+            self.connection.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def _finish(self, security_id: str, candle_time: str, status: str, response: Any) -> None:
+        self.connection.execute("UPDATE submitted_signals SET status=?,response=? WHERE security_id=? AND candle_time=?",
+                                (status, str(response)[:4000], security_id, candle_time))
+        self.connection.commit()
+
+    def run_once(self, now: datetime | None = None) -> list[dict]:
+        if not self.options.get("enabled"):
+            raise LiveOrderLocked("dhan_mcx.enabled is false")
+        now = now or datetime.now(IST)
+        outcomes: list[dict] = []
+        start = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        end = now.strftime("%Y-%m-%d %H:%M:%S")
+        analyzer = MCXSignalAnalyzer()
+        for item in self.options["watchlist"]:
+            security_id = str(item["security_id"])
+            if not self._within_session(item, now):
+                outcomes.append({"security_id": security_id, "status": "outside_configured_session"})
+                continue
+            candles = self.client.intraday_candles(security_id, item["instrument"], int(item.get("interval", 5)), start, end)
+            analysis = analyzer.analyze(candles)
+            candle_time = str(candles.iloc[-2]["timestamp"])
+            if self._already_processed(security_id, candle_time):
+                outcomes.append({"security_id": security_id, "status": "already_processed", "candle_time": candle_time})
+                continue
+            if analysis.signal == "HOLD" or analysis.confidence < float(self.options["minimum_signal_confidence"]):
+                outcomes.append({"security_id": security_id, "status": "no_qualified_signal", "analysis": analysis.as_dict()})
+                continue
+            correlation_id = f"auto-{security_id}-{int(candles.iloc[-2]["timestamp"].timestamp())}"[:30]
+            plan = MCXTradePlan(security_id, analysis.signal, int(item["quantity"]), analysis.close,
+                                float(analysis.proposed_stop), float(analysis.proposed_target),
+                                trailing_jump=float(item.get("trailing_jump", 0)),
+                                product_type=item.get("product_type", self.options["default_product_type"]),
+                                entry_order_type=item.get("entry_order_type", "LIMIT"), correlation_id=correlation_id)
+            preview = self.engine.preview(plan)
+            if not self.options.get("auto_trade_enabled"):
+                outcomes.append({"security_id": security_id, "status": "qualified_preview_only", "analysis": analysis.as_dict(), "preview": preview})
+                continue
+            if not self._reserve(security_id, candle_time, correlation_id):
+                outcomes.append({"security_id": security_id, "status": "already_reserved", "candle_time": candle_time})
+                continue
+            try:
+                result = self.engine.execute(plan, confirmed=True, automated=True)
+                self._finish(security_id, candle_time, "submitted", result["broker_response"])
+                outcomes.append({"security_id": security_id, "status": "submitted", "result": result})
+            except Exception as exc:
+                # Never retry an uncertain order automatically. A deployment
+                # operator must reconcile the correlation ID with Dhan first.
+                self._finish(security_id, candle_time, "needs_reconciliation", str(exc))
+                outcomes.append({"security_id": security_id, "status": "needs_reconciliation", "error": str(exc),
+                                 "correlation_id": correlation_id})
+        return outcomes
+
+    def run_forever(self, poll_seconds: int) -> None:
+        if poll_seconds < 15:
+            raise ValueError("poll_seconds must be at least 15")
+        try:
+            while True:
+                for outcome in self.run_once():
+                    print(outcome, flush=True)
+                time.sleep(poll_seconds)
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        self.connection.close()

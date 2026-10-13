@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from .backtest import run_backtest
 from .config import load_config
 from .dashboard import render_static, serve
-from .dhan_mcx import DhanMCXClient, MCXExecutionEngine, MCXSignalAnalyzer, MCXTradePlan
+from .dhan_mcx import DhanMCXAutopilot, DhanMCXClient, MCXExecutionEngine, MCXSignalAnalyzer, MCXTradePlan
 from .futures import futures_paper_cycle, render_futures_static
 from .market import BinanceFuturesMarketData, BinanceLiveClient, BinanceMarketData
 from .paper import paper_cycle, paper_loop
@@ -40,6 +40,9 @@ def main() -> None:
     analyze.add_argument("--interval", type=int, default=5, choices=(1, 5, 15, 25, 60))
     analyze.add_argument("--from-date", required=True, help="IST timestamp: YYYY-MM-DD HH:MM:SS")
     analyze.add_argument("--to-date", required=True, help="IST timestamp: YYYY-MM-DD HH:MM:SS")
+    auto = dhan_sub.add_parser("auto", help="Run the configured MCX watchlist; live submission stays gated")
+    auto.add_argument("--loop", action="store_true", help="Keep checking the watchlist every --poll-seconds")
+    auto.add_argument("--poll-seconds", type=int, default=60)
     preview = dhan_sub.add_parser("preview", help="Validate a protected MCX Super Order without sending it")
     execute = dhan_sub.add_parser("execute", help="Submit a protected MCX Super Order only after all live gates pass")
     for action in (preview, execute):
@@ -86,6 +89,17 @@ def main() -> None:
             candles = client.intraday_candles(args.security_id, args.instrument, args.interval,
                                                args.from_date, args.to_date)
             print(json.dumps(MCXSignalAnalyzer().analyze(candles).as_dict(), indent=2, sort_keys=True))
+            return
+        if args.dhan_command == "auto":
+            autopilot = DhanMCXAutopilot(cfg.dhan_mcx, engine, client)
+            try:
+                if args.loop:
+                    autopilot.run_forever(args.poll_seconds)
+                else:
+                    print(json.dumps(autopilot.run_once(), indent=2, sort_keys=True))
+            finally:
+                if not args.loop:
+                    autopilot.close()
             return
         plan = MCXTradePlan(
             security_id=args.security_id, side=args.side, quantity=args.quantity, entry_price=args.entry,

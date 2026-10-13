@@ -29,6 +29,9 @@
   "dhan_mcx": {
     "enabled": false,
     "live_order_submission": false,
+    "auto_trade_enabled": false,
+    "minimum_signal_confidence": 0.75,
+    "watchlist": [],
     "allocated_capital_inr": 0.0,
     "max_daily_loss_inr": 0.0,
     "max_loss_per_trade_inr": 0.0,

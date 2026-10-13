@@ -21,6 +21,26 @@ Live order submission is locked by default. Copy `config.json` to the ignored `c
 3. Private environment variables `DHAN_CLIENT_ID`, `DHAN_ACCESS_TOKEN`, and `DHAN_LIVE_ORDER_ACK=I_UNDERSTAND_DHAN_LIVE_ORDERS` are present.
 4. The command includes `--confirm-live` after its broker-margin preview succeeds.
 
+For automatic execution, a fifth layer is required: `dhan_mcx.auto_trade_enabled` plus `DHAN_AUTOMATION_ACK=I_UNDERSTAND_DHAN_AUTOMATION`. Add only active contracts to `dhan_mcx.watchlist`, each with a verified Dhan security ID, instrument code, valid lot quantity, and the contract's permitted IST session window. With auto trading disabled, `dhan-mcx auto --loop` still analyses the watchlist and emits qualified previews but never submits an order.
+
+Example private watchlist entry (use the current Dhan instrument master; do not invent a security ID or lot size):
+
+```json
+{
+  "security_id": "CURRENT_DHAN_MCX_ID",
+  "instrument": "FUTCOM",
+  "quantity": "CURRENT_VALID_LOT_QUANTITY",
+  "interval": 5,
+  "product_type": "INTRADAY",
+  "entry_order_type": "LIMIT",
+  "trailing_jump": 0,
+  "session_start_ist": "09:00",
+  "session_end_ist": "23:30"
+}
+```
+
+The session window must be verified for each commodity/contract before enabling automation. The existing Super Order carries the target and stop-loss protection; do not rely on a broker's intraday square-off as a substitute for the configured stop.
+
 Never put Dhan values in this public repository. Dhan requires an access token for API requests and requires static-IP whitelisting for order endpoints. The bot checks Dhan's margin calculator, Dhan available balance, the manually configured allocation cap, stop-based per-trade risk, allowed MCX security IDs, and open-position limit before it can submit a protected order. It intentionally refuses to infer contract lot size: choose an active instrument from Dhan's instrument master and enter its quantity in valid exchange units.
 
 ```powershell
@@ -31,6 +51,10 @@ python run.py dhan-mcx status
 
 # Completed-candle MCX analysis only; it cannot send an order.
 python run.py dhan-mcx analyze --security-id YOUR_MCX_SECURITY_ID --instrument FUTCOM --interval 5 --from-date "2026-10-13 09:00:00" --to-date "2026-10-13 17:00:00"
+
+# Repeatedly analyse a configured watchlist. With the default configuration,
+# it cannot submit a live order.
+python run.py --config config.local.json dhan-mcx auto --loop --poll-seconds 60
 
 # Validate margin/risk only; no order is possible.
 python run.py dhan-mcx preview --security-id YOUR_MCX_SECURITY_ID --side BUY --quantity YOUR_VALID_LOT_QUANTITY --entry 100 --stop 95 --target 110 --order-type LIMIT

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -10,7 +11,7 @@ import pandas as pd
 import requests
 
 from trading_bot.config import load_config
-from trading_bot.dhan_mcx import DhanMCXClient, LiveOrderLocked, MCXExecutionEngine, MCXSignalAnalyzer, MCXTradePlan
+from trading_bot.dhan_mcx import DhanMCXAutopilot, DhanMCXClient, LiveOrderLocked, MCXExecutionEngine, MCXSignalAnalyzer, MCXTradePlan
 from trading_bot.futures import _liquidity_delta_signal
 from trading_bot.market import BinanceFuturesMarketData, BinanceLiveClient
 from trading_bot.paper import paper_cycle
@@ -196,6 +197,7 @@ class DhanMCXTests(unittest.TestCase):
     def _options(self) -> dict:
         return {
             "enabled": True, "live_order_submission": False, "allocated_capital_inr": 10000,
+            "auto_trade_enabled": False, "minimum_signal_confidence": 0.75, "watchlist": [],
             "max_daily_loss_inr": 1000, "max_loss_per_trade_inr": 500, "max_open_positions": 1,
             "default_product_type": "INTRADAY", "auto_square_off_minutes_before_close": 15,
             "allowed_security_ids": ["123"],
@@ -239,6 +241,29 @@ class DhanMCXTests(unittest.TestCase):
         self.assertEqual(analysis.signal, "BUY")
         self.assertLess(analysis.proposed_stop, analysis.close)
         self.assertGreater(analysis.proposed_target, analysis.close)
+
+    def test_autopilot_stays_preview_only_when_automation_is_disabled(self) -> None:
+        client = Mock()
+        times = pd.date_range("2026-10-13 04:00", periods=50, freq="5min", tz="UTC")
+        prices = list(range(100, 150))
+        client.intraday_candles.return_value = pd.DataFrame({
+            "timestamp": times, "open": prices, "high": [price + 2 for price in prices],
+            "low": [price - 1 for price in prices], "close": [price + 1 for price in prices],
+            "volume": [100 if index < 48 else 200 for index in range(50)],
+        })
+        client.positions.return_value = []
+        client.margin.return_value = {"total_margin": "8000"}
+        client.fund_limits.return_value = {"availabelBalance": 20000}
+        options = self._options() | {"watchlist": [{"security_id": "123", "instrument": "FUTCOM", "quantity": 10,
+                                                       "session_start_ist": "09:00", "session_end_ist": "23:30"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            autopilot = DhanMCXAutopilot(options, MCXExecutionEngine(options, client), client,
+                                         str(Path(directory) / "auto.db"))
+            try:
+                outcomes = autopilot.run_once(datetime(2026, 10, 13, 12, tzinfo=__import__("zoneinfo").ZoneInfo("Asia/Kolkata")))
+                self.assertEqual(outcomes[0]["status"], "qualified_preview_only")
+            finally:
+                autopilot.close()
 
 
 if __name__ == "__main__":
