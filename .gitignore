@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 .env
+config.local.json
 data/*.db-journal
 data/*.db-shm
 data/*.db-wal

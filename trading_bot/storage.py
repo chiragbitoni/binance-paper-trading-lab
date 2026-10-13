@@ -85,6 +85,12 @@ CREATE TABLE IF NOT EXISTS market_candles (
   volume REAL NOT NULL,
   PRIMARY KEY(symbol, candle_time)
 );
+CREATE TABLE IF NOT EXISTS live_prices (
+  symbol TEXT PRIMARY KEY,
+  price REAL NOT NULL,
+  source TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS futures_wallet (
   id INTEGER PRIMARY KEY CHECK(id = 1),
   cash REAL NOT NULL,
@@ -155,8 +161,14 @@ class Storage:
     def __init__(self, path: str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.path)
+        # The real-time worker receives WebSocket callbacks on its own thread.
+        # It serializes every database operation with its service lock; allowing
+        # this connection to be used there avoids dropping otherwise-valid live
+        # price events solely because of SQLite's default thread guard.
+        self.connection = sqlite3.connect(self.path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA busy_timeout = 5000")
+        self.connection.execute("PRAGMA journal_mode = WAL")
         self.connection.executescript(SCHEMA)
         self._migrate_multi_symbol()
 
@@ -302,6 +314,18 @@ class Storage:
             "SELECT * FROM market_candles WHERE symbol=? ORDER BY candle_time DESC LIMIT ?", (symbol, limit)
         ).fetchall()
         return [dict(row) for row in reversed(rows)]
+
+    def save_live_price(self, symbol: str, price: float, source: str) -> None:
+        self.connection.execute(
+            """INSERT INTO live_prices(symbol,price,source) VALUES (?,?,?)
+            ON CONFLICT(symbol) DO UPDATE SET price=excluded.price,source=excluded.source,
+            updated_at=CURRENT_TIMESTAMP""",
+            (symbol, price, source),
+        )
+        self.connection.commit()
+
+    def live_prices(self) -> list[dict]:
+        return [dict(row) for row in self.connection.execute("SELECT * FROM live_prices ORDER BY symbol")]
 
     def initialize_futures_wallet(self, starting_balance: float) -> None:
         self.connection.execute("INSERT OR IGNORE INTO futures_wallet(id,cash) VALUES (1,?)", (starting_balance,))

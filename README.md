@@ -10,6 +10,37 @@ A transparent, paper-first Binance strategy research bot for five liquid USDT ma
 
 > This project is educational software, not financial advice. Historical results do not predict future performance. Real orders are disabled by default.
 
+## Dhan MCX live-execution module
+
+The repository now includes a separate DhanHQ v2 MCX integration for commodity derivatives. It does not share Binance credentials or change the Binance paper engine. It uses Dhan's **Super Order** endpoint for a single protected entry, target, stop-loss, and optional trailing-stop request rather than an unprotected entry followed by a later stop order.
+
+Live order submission is locked by default. Copy `config.json` to the ignored `config.local.json`, set positive `dhan_mcx` amounts for allocated capital, maximum daily loss, and maximum loss per trade there, then use `--config config.local.json`. To submit a real order, all four gates must pass:
+
+1. `dhan_mcx.enabled` is true.
+2. `dhan_mcx.live_order_submission` is true.
+3. Private environment variables `DHAN_CLIENT_ID`, `DHAN_ACCESS_TOKEN`, and `DHAN_LIVE_ORDER_ACK=I_UNDERSTAND_DHAN_LIVE_ORDERS` are present.
+4. The command includes `--confirm-live` after its broker-margin preview succeeds.
+
+Never put Dhan values in this public repository. Dhan requires an access token for API requests and requires static-IP whitelisting for order endpoints. The bot checks Dhan's margin calculator, Dhan available balance, the manually configured allocation cap, stop-based per-trade risk, allowed MCX security IDs, and open-position limit before it can submit a protected order. It intentionally refuses to infer contract lot size: choose an active instrument from Dhan's instrument master and enter its quantity in valid exchange units.
+
+```powershell
+# Read-only account status: no orders are possible.
+$env:DHAN_CLIENT_ID="..."
+$env:DHAN_ACCESS_TOKEN="..."
+python run.py dhan-mcx status
+
+# Completed-candle MCX analysis only; it cannot send an order.
+python run.py dhan-mcx analyze --security-id YOUR_MCX_SECURITY_ID --instrument FUTCOM --interval 5 --from-date "2026-10-13 09:00:00" --to-date "2026-10-13 17:00:00"
+
+# Validate margin/risk only; no order is possible.
+python run.py dhan-mcx preview --security-id YOUR_MCX_SECURITY_ID --side BUY --quantity YOUR_VALID_LOT_QUANTITY --entry 100 --stop 95 --target 110 --order-type LIMIT
+
+# Only after completing the four live gates above.
+python run.py dhan-mcx execute --security-id YOUR_MCX_SECURITY_ID --side BUY --quantity YOUR_VALID_LOT_QUANTITY --entry 100 --stop 95 --target 110 --confirm-live
+```
+
+This is a live-capable execution connector, not a promise of profit or a substitute for contract-specific research, exchange rules, or Dhan order-status reconciliation. Configure an external alert/monitor and review Dhan's current API documentation before live activation.
+
 ## Highlights
 
 - Five parallel markets: BTC, ETH, BNB, SOL, and XRP against USDT
@@ -23,7 +54,8 @@ A transparent, paper-first Binance strategy research bot for five liquid USDT ma
 - TradingView-style chart overlays: EMA 20/50/200, 20-candle support/resistance, entry, stop, and green/red risk-reward areas
 - Separate USD-M Futures paper lab: long/short setup research using EMA pullbacks with candle-delta confirmation and liquidity-sweep/delta setups, a single shared simulated wallet, 3× maximum simulated leverage, ATR stops/targets, and public funding/mark context
 - Binance market-data-only API; no credentials required for paper mode
-- Automated four-hour updates through GitHub Actions
+- An optional always-on real-time worker: live public prices monitor paper stops/trailing stops while 4h signals remain candle-close based
+- Automated four-hour updates through GitHub Actions (static demonstration only)
 - Lightweight dashboard published through GitHub Pages
 - Live-order method protected by an explicit safety lock
 
@@ -63,13 +95,14 @@ python -m pip install -r requirements.txt
 python run.py backtest
 python run.py paper
 python run.py futures-paper
+python run.py realtime
 python run.py dashboard
 ```
 
 Open `http://127.0.0.1:8765`. To keep checking for newly completed candles locally, run this in another terminal:
 
 ```powershell
-python run.py paper --loop
+python run.py realtime
 ```
 
 ## Configuration
@@ -95,6 +128,7 @@ python run.py backtest               Run historical strategy tests
 python run.py paper                  Process the newest completed candle once
 python run.py paper --loop           Continuously watch for completed candles
 python run.py futures-paper          Process the capped Futures paper lab once
+python run.py realtime               Run WebSocket protective-exit monitoring plus 4h strategy maintenance
 python run.py dashboard              Serve the local dashboard
 python run.py render-static          Rebuild docs/index.html for GitHub Pages
 python run.py render-futures-static  Rebuild docs/futures.html for GitHub Pages
@@ -104,7 +138,7 @@ python -m unittest discover -s tests -v  Run safety and configuration tests
 
 ## Automation
 
-`.github/workflows/paper-trading.yml` runs 12 minutes after every four-hour Binance candle closes. Each run:
+`.github/workflows/paper-trading.yml` runs 12 minutes after every four-hour Binance candle closes. It is useful for the public static demonstration, but it is not an always-on execution service. Each run:
 
 1. Downloads current public Binance candle data.
 2. Runs the paper-engine safety tests.
@@ -113,6 +147,15 @@ python -m unittest discover -s tests -v  Run safety and configuration tests
 5. Commits the updated SQLite state and pages.
 
 The workflow uses no Binance credentials and never invokes a live-order client. The Futures component uses public USD-M candles and mark/funding data only; it cannot submit a futures order.
+
+## Real-time paper operation
+
+`python run.py realtime` runs two separate paper-only loops:
+
+1. Public Binance Spot WebSocket prices continuously mark each position, tighten its ATR trailing stop, and immediately record a simulated protective exit if the observed price crosses its stop or Futures target.
+2. Completed four-hour candles are refreshed every minute. A strategy can create or close a *signal* only from completed data; a queued entry fills at the following 4h candle open.
+
+Run it on an always-on host to keep the monitor alive. The prepared Oracle Always Free VM service files and secure dashboard tunnel instructions are in [`deploy/oracle/README.md`](deploy/oracle/README.md). The live monitor uses the public Spot quote as a labelled approximation for a Futures-paper exit if USD-M market data is unavailable; it never represents an exchange order or guaranteed fill.
 
 If Binance restricts USD-M market-data access from the GitHub Actions region, the Futures paper cycle falls back to the project's public Spot candle feed so the scheduler can still run. The Futures dashboard labels that state as **Spot proxy (USD-M unavailable)** and leaves mark/funding fields blank; it is intentionally not presented as Futures data.
 

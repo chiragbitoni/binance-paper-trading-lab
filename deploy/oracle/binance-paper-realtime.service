@@ -1,0 +1,16 @@
+[Unit]
+Description=Binance Paper Lab real-time paper-only worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/binance-paper-trading-lab
+ExecStart=/opt/binance-paper-trading-lab/.venv/bin/python run.py realtime
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

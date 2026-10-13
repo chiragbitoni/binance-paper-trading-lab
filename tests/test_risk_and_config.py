@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 
 from trading_bot.config import load_config
+from trading_bot.dhan_mcx import DhanMCXClient, LiveOrderLocked, MCXExecutionEngine, MCXSignalAnalyzer, MCXTradePlan
 from trading_bot.futures import _liquidity_delta_signal
 from trading_bot.market import BinanceFuturesMarketData, BinanceLiveClient
 from trading_bot.paper import paper_cycle
@@ -98,6 +99,17 @@ class ConfigSafetyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "leverage"):
                 load_config(path)
 
+    def test_dhan_live_submission_requires_explicit_enablement(self) -> None:
+        source = Path("config.json")
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        payload["dhan_mcx"]["live_order_submission"] = True
+        payload["dhan_mcx"]["enabled"] = False
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "config.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "must be enabled"):
+                load_config(path)
+
 
 class PaperExecutionTests(unittest.TestCase):
     def test_close_based_entry_is_filled_on_the_following_candle_open(self) -> None:
@@ -178,6 +190,55 @@ class FuturesSignalTests(unittest.TestCase):
                          "delta_ratio": -0.2, "delta_quote": -100.0}
         short_frame = pd.DataFrame([base, short_sweep, short_confirm])
         self.assertEqual(_liquidity_delta_signal(short_frame, 2), ("SHORT", "liquidity sweep + negative delta"))
+
+
+class DhanMCXTests(unittest.TestCase):
+    def _options(self) -> dict:
+        return {
+            "enabled": True, "live_order_submission": False, "allocated_capital_inr": 10000,
+            "max_daily_loss_inr": 1000, "max_loss_per_trade_inr": 500, "max_open_positions": 1,
+            "default_product_type": "INTRADAY", "auto_square_off_minutes_before_close": 15,
+            "allowed_security_ids": ["123"],
+        }
+
+    def _plan(self) -> MCXTradePlan:
+        return MCXTradePlan("123", "BUY", 10, 100.0, 95.0, 110.0, trailing_jump=1.0)
+
+    def test_dhan_preview_requires_protected_plan_and_margin_within_caps(self) -> None:
+        client = Mock()
+        client.positions.return_value = []
+        client.margin.return_value = {"total_margin": "8000"}
+        client.fund_limits.return_value = {"availabelBalance": 20000}
+        engine = MCXExecutionEngine(self._options(), client)
+        preview = engine.preview(self._plan())
+        self.assertTrue(preview["approved"])
+        self.assertEqual(preview["segment"], "MCX_COMM")
+        self.assertEqual(preview["maximum_loss"], 50.0)
+        self.assertIn("Super Order", preview["protection"])
+
+    def test_dhan_preview_blocks_daily_loss_and_unprotected_live_client(self) -> None:
+        client = Mock()
+        client.positions.return_value = [{"exchangeSegment": "MCX_COMM", "netQty": 0,
+                                         "realizedProfit": -1100, "unrealizedProfit": 0}]
+        client.margin.return_value = {"total_margin": "8000"}
+        client.fund_limits.return_value = {"availabelBalance": 20000}
+        with self.assertRaisesRegex(LiveOrderLocked, "daily loss"):
+            MCXExecutionEngine(self._options(), client).preview(self._plan())
+
+        locked_client = DhanMCXClient("client", "token", allow_live_orders=False)
+        with self.assertRaises(LiveOrderLocked):
+            locked_client.place_super_order(self._plan())
+
+    def test_mcx_analyzer_uses_completed_candles_and_returns_a_protected_setup(self) -> None:
+        prices = list(range(100, 150))
+        candles = pd.DataFrame({
+            "open": prices, "high": [price + 2 for price in prices], "low": [price - 1 for price in prices],
+            "close": [price + 1 for price in prices], "volume": [100 if index < 48 else 200 for index in range(50)],
+        })
+        analysis = MCXSignalAnalyzer().analyze(candles)
+        self.assertEqual(analysis.signal, "BUY")
+        self.assertLess(analysis.proposed_stop, analysis.close)
+        self.assertGreater(analysis.proposed_target, analysis.close)
 
 
 if __name__ == "__main__":

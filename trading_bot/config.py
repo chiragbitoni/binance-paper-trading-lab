@@ -22,6 +22,7 @@ class Config:
     database: str
     dashboard_host: str
     dashboard_port: int
+    dhan_mcx: dict
     futures_paper: dict
 
 
@@ -43,6 +44,24 @@ def load_config(path: str | Path = "config.json") -> Config:
         raise ValueError("history_days must allow indicator warm-up")
     if not cfg.symbols or len(cfg.symbols) != len(set(cfg.symbols)):
         raise ValueError("symbols must contain at least one unique market")
+    dhan = cfg.dhan_mcx
+    required_dhan = {"enabled", "live_order_submission", "allocated_capital_inr", "max_daily_loss_inr",
+                     "max_loss_per_trade_inr", "max_open_positions", "default_product_type",
+                     "auto_square_off_minutes_before_close", "allowed_security_ids"}
+    missing_dhan = required_dhan - set(dhan)
+    if missing_dhan:
+        raise ValueError(f"dhan_mcx is missing: {', '.join(sorted(missing_dhan))}")
+    if dhan["default_product_type"] not in {"INTRADAY", "MARGIN"}:
+        raise ValueError("dhan_mcx default_product_type must be INTRADAY or MARGIN")
+    if dhan["max_open_positions"] < 1:
+        raise ValueError("dhan_mcx max_open_positions must be at least one")
+    if dhan["auto_square_off_minutes_before_close"] < 0:
+        raise ValueError("dhan_mcx auto_square_off_minutes_before_close cannot be negative")
+    risk_values = ("allocated_capital_inr", "max_daily_loss_inr", "max_loss_per_trade_inr")
+    if any(float(dhan[field]) < 0 for field in risk_values):
+        raise ValueError("dhan_mcx risk amounts cannot be negative")
+    if dhan["live_order_submission"] and not dhan["enabled"]:
+        raise ValueError("dhan_mcx must be enabled before live_order_submission can be enabled")
     if set(cfg.enabled_strategies) & set(cfg.research_only_strategies):
         raise ValueError("a strategy cannot be both enabled and research-only")
     from .strategies import STRATEGIES
